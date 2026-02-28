@@ -7,40 +7,70 @@ Voice-first AI agent for production incidents. Listens to war room calls, reason
 ## Quick Start (Stage 0 — Echo Agent)
 
 ### Prerequisites
+- macOS (Apple Silicon or Intel)
 - Python 3.12+
+- [Homebrew](https://brew.sh/)
 - [uv](https://docs.astral.sh/uv/)
-- A running [LiveKit server](https://docs.livekit.io/home/self-hosting/local/)
 - OpenAI API key
 
-### Setup
+### 1. Install dependencies
 
 ```bash
-# Install dependencies
 uv sync
-
-# Copy env and fill in your keys
-cp .env.example .env
-# Edit .env — at minimum set OPENAI_API_KEY
-
-# Start a local LiveKit server (if you don't have one)
-# Option A: Docker
-docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
-  -e LIVEKIT_KEYS="devkey: secret" \
-  livekit/livekit-server
-
-# Option B: livekit-cli
-livekit-server --dev
+brew install livekit livekit-cli
 ```
 
-### Run the Agent
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set your `OPENAI_API_KEY`. The LiveKit defaults are already configured for local dev.
+
+### 3. Start LiveKit server (Terminal 1)
+
+```bash
+livekit-server --dev --bind 0.0.0.0
+```
+
+Wait until you see `starting LiveKit server`. Leave it running.
+
+> **Note:** You must run LiveKit natively via Homebrew (not Docker). Docker causes WebRTC connectivity issues with the browser playground.
+
+### 4. Start the agent (Terminal 2)
 
 ```bash
 uv run python -m src.war_room_copilot.core.agent dev
 ```
 
-### Connect to the Room
+Wait until you see `registered worker`. Leave it running.
 
-Open the [LiveKit Agents Playground](https://agents-playground.livekit.io/) and connect to your local server. Speak into your mic — the agent will echo back what you say.
+### 5. Generate a room token (Terminal 3)
+
+```bash
+lk token create --api-key devkey --api-secret secret --join --room test-room --identity user1 --valid-for 24h
+```
+
+Copy the printed access token.
+
+### 6. Connect from the browser
+
+1. Open the [LiveKit Agents Playground](https://agents-playground.livekit.io/) in Chrome
+2. Click **Settings** (top right)
+3. Set **LiveKit URL** to `http://localhost:7880`
+4. Paste the token into the **Token** field
+5. Click **Connect**
+6. Allow microphone access when prompted
+7. Speak — the agent will echo back what you say
+
+### Alternative: Console mode (no browser/server needed)
+
+Skip steps 3-6 entirely. Console mode uses your Mac's mic and speakers directly — no LiveKit server, no browser, no tokens:
+
+```bash
+uv run python -m src.war_room_copilot.core.agent console
+```
 
 ## Architecture
 
