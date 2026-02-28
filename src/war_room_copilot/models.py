@@ -1,4 +1,4 @@
-"""Stage 1: Pydantic models for type safety at boundaries."""
+"""Pydantic models for type safety at boundaries."""
 
 from pydantic import BaseModel
 
@@ -13,3 +13,12 @@ class TranscriptSegment(BaseModel):
     text: str
     timestamp: float
     is_passive: bool = False
+
+
+class Decision(BaseModel):
+    id: str
+    text: str
+    speaker_id: str
+    timestamp: float
+    context: str
+    confidence: float

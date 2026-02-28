@@ -11,7 +11,7 @@ Voice-first AI agent for production incidents. Listens to war room calls, reason
 - Python 3.12+
 - [Homebrew](https://brew.sh/)
 - [uv](https://docs.astral.sh/uv/)
-- API keys: OpenAI, Speechmatics, ElevenLabs, GitHub (personal access token)
+- API keys: OpenAI, Speechmatics, ElevenLabs, GitHub (personal access token), Backboard (optional)
 
 ### 1. Install dependencies
 
@@ -26,7 +26,7 @@ brew install livekit livekit-cli
 cp .env.example .env
 ```
 
-Edit `.env` and set your `OPENAI_API_KEY`, `SPEECHMATICS_API_KEY`, `ELEVENLABS_API_KEY`, and `GITHUB_TOKEN`. The LiveKit defaults are already configured for local dev. Also set `GITHUB_ALLOWED_REPOS` in `src/war_room_copilot/config.py` to the repos you want the agent to access.
+Edit `.env` and set your `OPENAI_API_KEY`, `SPEECHMATICS_API_KEY`, `ELEVENLABS_API_KEY`, and `GITHUB_TOKEN`. Optionally set `BACKBOARD_API_KEY` for cross-session memory and decision tracking. The LiveKit defaults are already configured for local dev. Also set `GITHUB_ALLOWED_REPOS` in `src/war_room_copilot/config.py` to the repos you want the agent to access.
 
 ### 3. Start LiveKit server (Terminal 1)
 
@@ -78,7 +78,7 @@ uv run python -m src.war_room_copilot.core.agent console
 LiveKit Room → Speechmatics STT (diarization + speaker ID + custom vocab) → GPT-4.1-mini (+ GitHub tools) → ElevenLabs TTS → LiveKit Room
 ```
 
-Stage 1 adds incident reasoning, custom STT dictionary, centralized config, and a wake word (`"sam"`). Stage 2 adds **GitHub tools** (search code, commits, PRs, files, blame) via PyGitHub and upgrades the LLM to **GPT-4.1-mini**.
+Stage 1 adds incident reasoning, custom STT dictionary, centralized config, and a wake word (`"sam"`). Stage 2 adds **GitHub tools** (search code, commits, PRs, files, blame) via PyGitHub and upgrades the LLM to **GPT-4.1-mini**. Stage 3 adds **memory and decision tracking** — structured short-term transcript memory, Backboard.io for cross-session recall, LLM-based decision detection, and SQLite persistence.
 
 See [docs/architecture.md](docs/architecture.md) for details.
 
@@ -88,8 +88,14 @@ See [docs/architecture.md](docs/architecture.md) for details.
 src/war_room_copilot/
 ├── core/
 │   └── agent.py          # LiveKit agent entry point (start here)
+├── memory/
+│   ├── short_term.py     # Sliding window transcript memory
+│   ├── long_term.py      # Backboard.io cross-session memory
+│   ├── decisions.py      # LLM-based decision detection
+│   └── db.py             # SQLite persistence
 ├── tools/
-│   └── github.py         # GitHub tools (search, commits, PRs, blame)
+│   ├── github.py         # GitHub tools (search, commits, PRs, blame)
+│   └── recall.py         # Decision recall tool
 ├── config.py             # Centralized configuration
 └── models.py             # Pydantic models
 assets/

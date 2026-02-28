@@ -1,11 +1,13 @@
-"""LiveKit agent with Speechmatics STT, ElevenLabs TTS, GitHub tools, and incident reasoning."""
+"""LiveKit agent with memory, decision tracking, GitHub tools, and incident reasoning."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import os
 import re
+import time
 from typing import Any
 
 from dotenv import load_dotenv
@@ -22,17 +24,20 @@ from livekit.plugins.speechmatics import (
 from ..config import (
     AGENT_PROMPT_FILE,
     DATA_DIR,
+    DB_FILE,
     ELEVENLABS_VOICE_ID,
     FOCUS_SPEAKERS,
     GITHUB_ALLOWED_REPOS,
     K8S_DICTIONARY_FILE,
     LLM_MODEL,
+    SHORT_TERM_WINDOW_SIZE,
     SPEAKERS_FILE,
     VOICEPRINT_CAPTURE_INTERVAL,
     VOICEPRINT_INITIAL_DELAY,
     WAKE_WORD,
 )
-from ..models import SpeakerMetadata
+from ..memory import DecisionTracker, IncidentDB, LongTermMemory, ShortTermMemory
+from ..models import SpeakerMetadata, TranscriptSegment
 from ..tools.github import (
     get_blame,
     get_commit_diff,
@@ -42,12 +47,15 @@ from ..tools.github import (
     search_code,
     search_issues,
 )
+from ..tools.recall import recall_decision, set_memory_context
 
 load_dotenv()
 
 logger = logging.getLogger("war-room-copilot")
 
 RESERVED_LABEL = re.compile(r"^S\d+$")
+SPEAKER_TAG = re.compile(r"<(\w+)>(.*?)</\1>", re.DOTALL)
+PASSIVE_WRAP = re.compile(r"<PASSIVE>(.*?)</PASSIVE>", re.DOTALL)
 
 
 def load_known_speakers() -> list[SpeakerMetadata]:
@@ -111,27 +119,72 @@ def to_speaker_identifiers(speakers: list[SpeakerMetadata]) -> list[SpeakerIdent
     ]
 
 
+def parse_transcript(raw_text: str) -> TranscriptSegment:
+    """Parse Speechmatics tagged text into a TranscriptSegment."""
+    is_passive = bool(PASSIVE_WRAP.search(raw_text))
+    inner = PASSIVE_WRAP.sub(r"\1", raw_text)
+    match = SPEAKER_TAG.search(inner)
+    if match:
+        speaker_id = match.group(1)
+        text = match.group(2).strip()
+    else:
+        speaker_id = "unknown"
+        text = inner.strip()
+    return TranscriptSegment(
+        speaker_id=speaker_id,
+        text=text,
+        timestamp=time.time(),
+        is_passive=is_passive,
+    )
+
+
 class WarRoomAgent(Agent):  # type: ignore[misc]
-    def __init__(self, instructions: str) -> None:
+    def __init__(
+        self,
+        instructions: str,
+        memory: ShortTermMemory,
+        decision_tracker: DecisionTracker | None,
+        db: IncidentDB,
+        session_id: int,
+        long_term: LongTermMemory | None,
+    ) -> None:
         super().__init__(instructions=instructions)
-        self._buffer: list[str] = []
+        self._memory = memory
+        self._decision_tracker = decision_tracker
+        self._db = db
+        self._session_id = session_id
+        self._long_term = long_term
 
     async def on_user_turn_completed(
         self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage
     ) -> None:
-        text = (new_message.text_content or "").lower()
-        if WAKE_WORD not in text:
-            self._buffer.append(new_message.text_content or "")
+        raw_text = new_message.text_content or ""
+        segment = parse_transcript(raw_text)
+
+        # Store in short-term memory and SQLite
+        self._memory.add(segment)
+        asyncio.create_task(self._db.add_segment(self._session_id, segment))
+
+        # Store in Backboard long-term memory (non-blocking)
+        if self._long_term is not None:
+            asyncio.create_task(self._long_term.store(f"[{segment.speaker_id}] {segment.text}"))
+
+        # Check for decisions (non-blocking)
+        if self._decision_tracker is not None:
+            asyncio.create_task(self._decision_tracker.check_for_decision(segment))
+
+        # Wake word check
+        if WAKE_WORD not in segment.text.lower():
             raise StopResponse()
 
-        # Wake word detected — prepend buffered context
-        if self._buffer:
-            context_summary = "\n".join(self._buffer)
+        # Wake word detected — inject buffered context
+        context = self._memory.format_context()
+        if context:
             turn_ctx.add_message(
                 role="user",
-                content=f"[Recent conversation context]\n{context_summary}",
+                content=f"[Recent conversation context]\n{context}",
             )
-            self._buffer.clear()
+            self._memory.clear()
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:
@@ -144,6 +197,46 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     prompt = load_agent_prompt(room_name, known_speakers)
     custom_vocab = load_custom_vocab()
 
+    # Initialize SQLite
+    db = IncidentDB(DB_FILE)
+    await db.initialize()
+    session_id = await db.start_session(room_name)
+    logger.info("DB session: %d", session_id)
+
+    # Initialize short-term memory
+    memory = ShortTermMemory(SHORT_TERM_WINDOW_SIZE)
+
+    # Initialize long-term memory (Backboard) — optional
+    long_term: LongTermMemory | None = None
+    decision_tracker: DecisionTracker | None = None
+    backboard_key = os.environ.get("BACKBOARD_API_KEY")
+
+    if backboard_key:
+        try:
+            long_term = LongTermMemory(backboard_key)
+            await long_term.initialize()
+            await long_term.start_session(room_name)
+            logger.info("Backboard long-term memory initialized")
+
+            decision_tracker = DecisionTracker(
+                short_term=memory,
+                long_term=long_term,
+                db=db,
+                session_id=session_id,
+                backboard_api_key=backboard_key,
+            )
+            await decision_tracker.initialize()
+            logger.info("Decision tracker initialized")
+        except Exception:
+            logger.exception("Failed to initialize Backboard — continuing without long-term memory")
+            long_term = None
+            decision_tracker = None
+    else:
+        logger.warning("BACKBOARD_API_KEY not set — long-term memory disabled")
+
+    # Set up recall tool context
+    set_memory_context(db, long_term, session_id)  # type: ignore[arg-type]
+
     stt = speechmatics.STT(
         turn_detection_mode=TurnDetectionMode.SMART_TURN,
         operating_point=OperatingPoint.ENHANCED,
@@ -155,7 +248,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         known_speakers=to_speaker_identifiers(known_speakers),
     )
 
-    github_tools = [
+    tools: list[Any] = [
         search_code,
         get_recent_commits,
         get_commit_diff,
@@ -163,6 +256,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         search_issues,
         read_file,
         get_blame,
+        recall_decision,
     ]
 
     session = AgentSession(
@@ -174,12 +268,20 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             prefix_padding_duration=0.3,
             activation_threshold=0.45,
         ),
-        tools=github_tools,
+        tools=tools,
+        max_tool_steps=7,
     )
 
     await session.start(
         room=ctx.room,
-        agent=WarRoomAgent(instructions=prompt),
+        agent=WarRoomAgent(
+            instructions=prompt,
+            memory=memory,
+            decision_tracker=decision_tracker,
+            db=db,
+            session_id=session_id,
+            long_term=long_term,
+        ),
         room_input_options=RoomInputOptions(),
     )
 
@@ -195,6 +297,17 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             await asyncio.sleep(VOICEPRINT_CAPTURE_INTERVAL)
 
     asyncio.create_task(capture_voiceprints())
+
+    async def on_shutdown() -> None:
+        await db.end_session(session_id)
+        if decision_tracker:
+            await decision_tracker.close()
+        if long_term:
+            await long_term.close()
+        await db.close()
+        logger.info("Session %d ended, resources cleaned up", session_id)
+
+    ctx.add_shutdown_callback(on_shutdown)
 
 
 if __name__ == "__main__":

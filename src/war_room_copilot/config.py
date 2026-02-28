@@ -26,3 +26,15 @@ K8S_DICTIONARY_FILE = PROJECT_ROOT / "assets" / "k8s_dictionary.json"
 
 # GitHub
 GITHUB_ALLOWED_REPOS: list[str] = ["nishuastic/war-room-copilot"]
+
+# Memory
+SHORT_TERM_WINDOW_SIZE = 100  # ~10 min of conversation
+DECISION_CHECK_INTERVAL = 5  # check every N new segments
+DECISION_CONFIDENCE_THRESHOLD = 0.6
+
+# Backboard
+BACKBOARD_ASSISTANT_FILE = DATA_DIR / "backboard_assistant.json"
+BACKBOARD_DECISION_ASSISTANT_FILE = DATA_DIR / "backboard_decision_assistant.json"
+
+# SQLite
+DB_FILE = DATA_DIR / "war_room.db"

@@ -19,6 +19,7 @@ OPENAI_API_KEY
 SPEECHMATICS_API_KEY
 ELEVENLABS_API_KEY
 GITHUB_TOKEN
+BACKBOARD_API_KEY
 
 ## File Maintenance Rules
 - After ANY architecture change: update docs/architecture.md (mermaid diagrams)

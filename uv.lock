@@ -123,6 +123,15 @@ wheels = [
 ]
 
 [[package]]
+name = "aiosqlite"
+version = "0.22.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/8a/64761f4005f17809769d23e518d915db74e6310474e733e3593cfc854ef1/aiosqlite-0.22.1.tar.gz", hash = "sha256:043e0bd78d32888c0a9ca90fc788b38796843360c855a7262a532813133a0650", size = 14821, upload-time = "2025-12-23T19:25:43.997Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/00/b7/e3bf5133d697a08128598c8d0abc5e16377b51465a33756de24fa7dee953/aiosqlite-0.22.1-py3-none-any.whl", hash = "sha256:21c002eb13823fad740196c5a2e9d8e62f6243bd9e7e4a1f87fb5e44ecb4fceb", size = 17405, upload-time = "2025-12-23T19:25:42.139Z" },
+]
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -203,6 +212,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5e/f5/f6db0dd86b70167a4d55ee0d9d9640983c570d25504f2bde42599f38241e/av-16.1.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:cac0c074892ea97113b53556ff41c99562db7b9f09f098adac1f08318c2acad5", size = 41770481, upload-time = "2026-01-11T09:59:12.74Z" },
     { url = "https://files.pythonhosted.org/packages/9e/8b/33651d658e45e16ab7671ea5fcf3d20980ea7983234f4d8d0c63c65581a5/av-16.1.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:7dec3dcbc35a187ce450f65a2e0dda820d5a9e6553eea8344a1459af11c98649", size = 43036824, upload-time = "2026-01-11T09:59:16.507Z" },
     { url = "https://files.pythonhosted.org/packages/83/41/7f13361db54d7e02f11552575c0384dadaf0918138f4eaa82ea03a9f9580/av-16.1.0-cp314-cp314t-win_amd64.whl", hash = "sha256:6f90dc082ff2068ddbe77618400b44d698d25d9c4edac57459e250c16b33d700", size = 31948164, upload-time = "2026-01-11T09:59:19.501Z" },
+]
+
+[[package]]
+name = "backboard-sdk"
+version = "1.5.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0c/ac/e5ffdf5fc4a8b92fb4a61eea6b8930daf6d4394e0831e0531bbd4751910d/backboard_sdk-1.5.2.tar.gz", hash = "sha256:41e55d96a747dfad2970fde75e8e9bc726fc37f2b642fd9ba8a96ec7b5f89ee6", size = 20055, upload-time = "2026-02-19T18:49:27.54Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ac/33/b0bad1592d098ff3a0b58a350d94679b8fc2f370c72e01b1cfe2e5ee238b/backboard_sdk-1.5.2-py3-none-any.whl", hash = "sha256:f0fdc642e033c5761268ce076379b5eb403104494a27aadfd4c299acf8816dae", size = 15177, upload-time = "2026-02-19T18:49:26.025Z" },
 ]
 
 [[package]]
@@ -2276,6 +2298,8 @@ name = "war-room-copilot"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiosqlite" },
+    { name = "backboard-sdk" },
     { name = "livekit-agents", extra = ["openai"] },
     { name = "livekit-plugins-elevenlabs" },
     { name = "livekit-plugins-silero" },
@@ -2294,6 +2318,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.20.0" },
+    { name = "backboard-sdk" },
     { name = "livekit-agents", extras = ["openai"], specifier = ">=1.0" },
     { name = "livekit-plugins-elevenlabs" },
     { name = "livekit-plugins-silero" },
