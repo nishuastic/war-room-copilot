@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS agent_trace (
     data TEXT NOT NULL,
     timestamp REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    llm_calls INTEGER NOT NULL DEFAULT 0,
+    total_input_tokens INTEGER NOT NULL DEFAULT 0,
+    total_output_tokens INTEGER NOT NULL DEFAULT 0,
+    elevenlabs_chars INTEGER NOT NULL DEFAULT 0,
+    latency_ms_sum REAL NOT NULL DEFAULT 0,
+    latency_count INTEGER NOT NULL DEFAULT 0,
+    timestamp REAL NOT NULL
+);
 """
 
 
@@ -157,15 +168,19 @@ class IncidentDB:
         return [dict(r) for r in rows]
 
     async def get_session(self, session_id: int) -> dict[str, Any] | None:
-        rows = await self._db().execute_fetchall(
-            "SELECT * FROM sessions WHERE id = ?",
-            (session_id,),
+        rows = list(
+            await self._db().execute_fetchall(
+                "SELECT * FROM sessions WHERE id = ?",
+                (session_id,),
+            )
         )
         return dict(rows[0]) if rows else None
 
     async def get_latest_session_id(self) -> int | None:
-        rows = await self._db().execute_fetchall(
-            "SELECT id FROM sessions ORDER BY started_at DESC LIMIT 1",
+        rows = list(
+            await self._db().execute_fetchall(
+                "SELECT id FROM sessions ORDER BY started_at DESC LIMIT 1",
+            )
         )
         return rows[0]["id"] if rows else None
 
@@ -174,6 +189,84 @@ class IncidentDB:
             "SELECT * FROM sessions ORDER BY started_at DESC",
         )
         return [dict(r) for r in rows]
+
+    async def update_metrics(
+        self,
+        session_id: int,
+        llm_calls: int = 0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        elevenlabs_chars: int = 0,
+        latency_ms: float = 0.0,
+    ) -> None:
+        existing = await self._db().execute_fetchall(
+            "SELECT id FROM metrics WHERE session_id = ?", (session_id,)
+        )
+        if existing:
+            latency_count_add = 1 if latency_ms > 0 else 0
+            await self._db().execute(
+                """UPDATE metrics SET
+                    llm_calls = llm_calls + ?,
+                    total_input_tokens = total_input_tokens + ?,
+                    total_output_tokens = total_output_tokens + ?,
+                    elevenlabs_chars = elevenlabs_chars + ?,
+                    latency_ms_sum = latency_ms_sum + ?,
+                    latency_count = latency_count + ?,
+                    timestamp = ?
+                WHERE session_id = ?""",
+                (
+                    llm_calls,
+                    input_tokens,
+                    output_tokens,
+                    elevenlabs_chars,
+                    latency_ms,
+                    latency_count_add,
+                    time.time(),
+                    session_id,
+                ),
+            )
+        else:
+            await self._db().execute(
+                """INSERT INTO metrics
+                    (session_id, llm_calls, total_input_tokens, total_output_tokens,
+                     elevenlabs_chars, latency_ms_sum, latency_count, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    llm_calls,
+                    input_tokens,
+                    output_tokens,
+                    elevenlabs_chars,
+                    latency_ms,
+                    1 if latency_ms > 0 else 0,
+                    time.time(),
+                ),
+            )
+        await self._db().commit()
+
+    async def get_metrics(self, session_id: int) -> dict[str, Any]:
+        rows = list(
+            await self._db().execute_fetchall(
+                "SELECT * FROM metrics WHERE session_id = ?", (session_id,)
+            )
+        )
+        if not rows:
+            return {
+                "llm_calls": 0,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "elevenlabs_chars": 0,
+                "avg_latency_ms": 0.0,
+            }
+        r = rows[0]
+        avg_latency = (r["latency_ms_sum"] / r["latency_count"]) if r["latency_count"] > 0 else 0.0
+        return {
+            "llm_calls": r["llm_calls"],
+            "total_input_tokens": r["total_input_tokens"],
+            "total_output_tokens": r["total_output_tokens"],
+            "elevenlabs_chars": r["elevenlabs_chars"],
+            "avg_latency_ms": round(avg_latency, 1),
+        }
 
     async def close(self) -> None:
         if self._conn:

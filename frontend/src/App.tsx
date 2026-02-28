@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { TranscriptViewer } from './components/TranscriptViewer'
 import { AgentTrace } from './components/AgentTrace'
 import { DecisionList } from './components/DecisionList'
+import { BusinessMetrics } from './components/BusinessMetrics'
+import { IssueAnalytics } from './components/IssueAnalytics'
+import { RunbookPanel } from './components/RunbookPanel'
 import { useSSE } from './hooks/useSSE'
 import { useSessions, useLatestSessionId } from './hooks/useSessions'
 import type { TranscriptRow } from './components/TranscriptViewer'
@@ -10,6 +13,8 @@ import type { DecisionRow } from './components/DecisionList'
 import './index.css'
 
 const API = '/api'
+
+type RightTab = 'trace' | 'decisions' | 'metrics'
 
 function useDecisions(sessionId: number | null) {
   const [decisions, setDecisions] = useState<DecisionRow[]>([])
@@ -44,11 +49,26 @@ function fmtDate(ts: number) {
   return new Date(ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+async function exportPostMortem(sessionId: number) {
+  const res = await fetch(`${API}/sessions/${sessionId}/summary`)
+  if (!res.ok) { alert('Failed to generate summary'); return }
+  const { markdown } = await res.json()
+  const blob = new Blob([markdown], { type: 'text/markdown' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `postmortem-session-${sessionId}.md`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function App() {
   const [dark, setDark] = useDarkMode()
   const { sessions, loading } = useSessions()
   const latestId = useLatestSessionId()
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [rightTab, setRightTab] = useState<RightTab>('trace')
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     if (selectedId === null && latestId !== null) setSelectedId(latestId)
@@ -63,6 +83,13 @@ export default function App() {
   const decisions = useDecisions(selectedId)
   const session = sessions.find((s) => s.id === selectedId)
   const isLive = session?.ended_at === null
+
+  const handleExport = async () => {
+    if (!selectedId) return
+    setExporting(true)
+    await exportPostMortem(selectedId)
+    setExporting(false)
+  }
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
@@ -146,6 +173,39 @@ export default function App() {
         {/* Spacer */}
         <div style={{ flex: 1 }} />
 
+        {/* Export button */}
+        {selectedId && (
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            title="Download post-mortem markdown"
+            style={{
+              height: 32, padding: '0 12px',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border)',
+              background: 'var(--surface-2)',
+              cursor: exporting ? 'wait' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontSize: 12, fontWeight: 600, color: 'var(--text-2)',
+              transition: 'all 0.15s',
+              opacity: exporting ? 0.6 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (!exporting) {
+                e.currentTarget.style.borderColor = 'var(--accent)'
+                e.currentTarget.style.color = 'var(--accent)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'var(--border)'
+              e.currentTarget.style.color = 'var(--text-2)'
+            }}
+          >
+            <span style={{ fontSize: 13 }}>{exporting ? '⏳' : '📄'}</span>
+            {exporting ? 'Generating…' : 'Export Post-Mortem'}
+          </button>
+        )}
+
         {/* Live badge */}
         {session && (
           <div style={{
@@ -205,8 +265,7 @@ export default function App() {
         <div style={{
           flex: 1,
           display: 'grid',
-          gridTemplateColumns: '1fr 320px',
-          gridTemplateRows: '1fr 1fr',
+          gridTemplateColumns: '1fr 340px',
           gap: 12,
           padding: 12,
           overflow: 'hidden',
@@ -216,20 +275,64 @@ export default function App() {
             title="Transcript"
             count={transcriptRows.length}
             accentColor="var(--accent)"
-            style={{ gridRow: '1 / 3' }}
           >
             <TranscriptViewer rows={transcriptRows} />
           </Panel>
 
-          {/* Agent Trace — top right */}
-          <Panel title="Agent Trace" count={traceRows.length} accentColor="#8b5cf6">
-            <AgentTrace rows={traceRows} />
-          </Panel>
+          {/* Right column: tabbed panel */}
+          <div style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            boxShadow: 'var(--shadow-sm)',
+          }}>
+            {/* Tab bar */}
+            <div style={{
+              display: 'flex',
+              borderBottom: '1px solid var(--border)',
+              background: 'var(--surface-2)',
+              flexShrink: 0,
+            }}>
+              <Tab
+                label="Trace"
+                count={traceRows.length}
+                active={rightTab === 'trace'}
+                color="#8b5cf6"
+                onClick={() => setRightTab('trace')}
+              />
+              <Tab
+                label="Decisions"
+                count={decisions.length}
+                active={rightTab === 'decisions'}
+                color="var(--green)"
+                onClick={() => setRightTab('decisions')}
+              />
+              <Tab
+                label="Metrics"
+                active={rightTab === 'metrics'}
+                color="var(--accent)"
+                onClick={() => setRightTab('metrics')}
+              />
+            </div>
 
-          {/* Decisions — bottom right */}
-          <Panel title="Decisions" count={decisions.length} accentColor="var(--green)">
-            <DecisionList decisions={decisions} />
-          </Panel>
+            {/* Tab content */}
+            <div style={{ flex: 1, overflow: 'auto', padding: '4px 14px 14px' }}>
+              {rightTab === 'trace' && <AgentTrace rows={traceRows} />}
+              {rightTab === 'decisions' && <DecisionList decisions={decisions} />}
+              {rightTab === 'metrics' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <BusinessMetrics sessionId={selectedId} />
+                  <Divider label="Issue Analytics" />
+                  <IssueAnalytics sessionId={selectedId} />
+                  <Divider label="Matched Runbooks" />
+                  <RunbookPanel sessionId={selectedId} />
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -239,6 +342,58 @@ export default function App() {
           50% { opacity: 0.6; }
         }
       `}</style>
+    </div>
+  )
+}
+
+function Tab({
+  label, count, active, color, onClick,
+}: {
+  label: string; count?: number; active: boolean; color: string; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        flex: 1,
+        padding: '9px 6px',
+        border: 'none',
+        background: 'none',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 5,
+        fontSize: 12,
+        fontWeight: 600,
+        color: active ? color : 'var(--text-4)',
+        borderBottom: `2px solid ${active ? color : 'transparent'}`,
+        transition: 'all 0.15s',
+        fontFamily: 'Inter, sans-serif',
+      }}
+    >
+      {label}
+      {count !== undefined && count > 0 && (
+        <span style={{
+          fontSize: 10, fontWeight: 700,
+          background: active ? color : 'var(--border)',
+          color: active ? 'white' : 'var(--text-4)',
+          borderRadius: 8, padding: '1px 5px',
+          fontFamily: 'JetBrains Mono, monospace',
+        }}>{count}</span>
+      )}
+    </button>
+  )
+}
+
+function Divider({ label }: { label: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+      <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
     </div>
   )
 }
@@ -258,13 +413,12 @@ function StatPill({ label, value, color }: { label: string; value: number; color
 }
 
 function Panel({
-  title, count, accentColor, children, style,
+  title, count, accentColor, children,
 }: {
   title: string
   count: number
   accentColor: string
   children: React.ReactNode
-  style?: React.CSSProperties
 }) {
   return (
     <div style={{
@@ -275,7 +429,6 @@ function Panel({
       flexDirection: 'column',
       overflow: 'hidden',
       boxShadow: 'var(--shadow-sm)',
-      ...style,
     }}>
       {/* Panel header */}
       <div style={{
