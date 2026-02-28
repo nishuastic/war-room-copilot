@@ -13,6 +13,8 @@ flowchart LR
     subgraph Stage 1
         VAD[Silero VAD]
         STT[Speechmatics STT<br/>Enhanced + Custom Vocab]
+        WW{Wake Word?<br/>sam}
+        Buffer[(Transcript Buffer)]
         LLM[GPT-4o-mini<br/>Incident Reasoning]
         TTS[ElevenLabs TTS]
     end
@@ -20,12 +22,16 @@ flowchart LR
     Config[config.py] -.-> STT
     Config -.-> LLM
     Config -.-> TTS
+    Config -.-> WW
     Dict[k8s_dictionary.json] -.-> STT
     Prompt[agent.md] -.-> LLM
 
     User -- audio --> VAD
     VAD -- voice activity --> STT
-    STT -- text + speaker ID --> LLM
+    STT -- text + speaker ID --> WW
+    WW -- "no wake word" --> Buffer
+    WW -- "wake word detected" --> LLM
+    Buffer -. "context injected" .-> LLM
     LLM -- response --> TTS
     TTS -- audio --> User
 ```
@@ -38,7 +44,7 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
 - Speaker diarization (who said what)
 - Speaker identification (recognizes returning speakers via voiceprints saved to `speakers.json`)
 - Smart turn detection (knows when someone is done speaking)
-- Personalized greetings for known speakers
+- **Wake word activation** — agent silently buffers conversation and only responds when addressed with `"sam"`, then replies with full context awareness
 - **Custom vocabulary** for Kubernetes, infrastructure, and incident terms (`assets/k8s_dictionary.json`)
 - **Incident reasoning** — asks clarifying questions, identifies unknowns, suggests next steps, flags contradictions
 - **Dynamic prompt** with room name and known speakers injected
@@ -59,11 +65,14 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
 1. User speaks into LiveKit room
 2. Silero VAD detects voice activity
 3. Speechmatics transcribes audio to text with speaker labels (using Enhanced mode + custom vocab)
-4. Dynamic prompt is built with room name and known speaker names
-5. GPT-4o-mini reasons about the incident and generates a response
-6. ElevenLabs TTS converts response to audio
-7. Audio sent back to LiveKit room
-8. Background task captures speaker voiceprints every 30s for future identification
+4. `on_user_turn_completed` checks for wake word (`"sam"`):
+   - **No wake word**: transcript is buffered silently (`StopResponse` cancels auto-reply)
+   - **Wake word detected**: buffered context is injected into the chat context, and the agent responds
+5. Dynamic prompt is built with room name and known speaker names
+6. GPT-4o-mini reasons about the incident and generates a response
+7. ElevenLabs TTS converts response to audio
+8. Audio sent back to LiveKit room
+9. Background task captures speaker voiceprints every 30s for future identification
 
 ## Tech Decisions
 

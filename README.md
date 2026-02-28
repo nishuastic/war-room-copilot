@@ -62,7 +62,7 @@ Copy the printed access token.
 4. Paste the token into the **Token** field
 5. Click **Connect**
 6. Allow microphone access when prompted
-7. Speak — the agent will respond
+7. Speak — the agent silently listens and accumulates context. Say **"sam"** to trigger a response with full awareness of the conversation so far
 
 ### Alternative: Console mode (no browser/server needed)
 
@@ -78,7 +78,7 @@ uv run python -m src.war_room_copilot.core.agent console
 LiveKit Room → Speechmatics STT (diarization + speaker ID + custom vocab) → GPT-4o-mini → ElevenLabs TTS → LiveKit Room
 ```
 
-Stage 1 adds incident reasoning (the agent asks clarifying questions and suggests next steps instead of echoing), a custom dictionary (`assets/k8s_dictionary.json`) so Speechmatics correctly transcribes Kubernetes and infrastructure terms, and centralized config.
+Stage 1 adds incident reasoning (the agent asks clarifying questions and suggests next steps instead of echoing), a custom dictionary (`assets/k8s_dictionary.json`) so Speechmatics correctly transcribes Kubernetes and infrastructure terms, centralized config, and a **wake word** (`"sam"`) so the agent only responds when addressed.
 
 See [docs/architecture.md](docs/architecture.md) for details.
 
