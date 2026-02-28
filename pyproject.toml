@@ -7,8 +7,9 @@ requires-python = ">=3.12"
 dependencies = [
     "livekit-agents[openai]>=1.0",
     "livekit-plugins-silero",
+    "livekit-plugins-speechmatics",
+    "livekit-plugins-elevenlabs",
     "python-dotenv",
-    "pydantic>=2.0",
 ]
 
 [project.optional-dependencies]
