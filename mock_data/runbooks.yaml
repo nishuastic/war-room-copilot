@@ -1,0 +1,57 @@
+runbooks:
+  - title: "Database Connection Pool Exhaustion"
+    description: "When a service exhausts its database connection pool"
+    tags: ["database", "connection-pool", "postgres"]
+    severity: critical
+    steps:
+      - "Check current connections: SELECT count(*) FROM pg_stat_activity WHERE datname = 'production'"
+      - "Identify long-running queries: SELECT pid, now() - pg_stat_activity.query_start AS duration, query FROM pg_stat_activity WHERE state != 'idle' ORDER BY duration DESC"
+      - "If queries are stuck, consider: SELECT pg_terminate_backend(pid) for the offending PIDs"
+      - "Increase pool size temporarily in service config (max_connections)"
+      - "Check for connection leaks in recent deploys"
+      - "Consider enabling PgBouncer if not already in use"
+
+  - title: "High Error Rate on Checkout"
+    description: "When checkout error rate exceeds 5%"
+    tags: ["checkout", "error-rate", "payments"]
+    severity: critical
+    steps:
+      - "Check payment gateway health: GET /health"
+      - "Review recent deploys to checkout-service"
+      - "Check circuit breaker status in Consul"
+      - "If payment-gateway is down, enable fallback to secondary processor"
+      - "Monitor inventory-service for cascading failures"
+      - "Communicate to stakeholders: ETA for resolution"
+
+  - title: "Deadlock in Database"
+    description: "When deadlocks are detected in production database"
+    tags: ["database", "deadlock", "postgres", "inventory"]
+    severity: high
+    steps:
+      - "Identify deadlocked transactions: SELECT * FROM pg_locks WHERE NOT granted"
+      - "Check which queries are involved using pg_stat_activity"
+      - "Kill the blocking transaction if safe: SELECT pg_terminate_backend(pid)"
+      - "Review the code path that caused concurrent updates"
+      - "Consider adding advisory locks or changing transaction isolation level"
+
+  - title: "Service Circuit Breaker Open"
+    description: "When a circuit breaker trips for an upstream dependency"
+    tags: ["circuit-breaker", "resilience", "upstream"]
+    severity: high
+    steps:
+      - "Verify upstream service health independently"
+      - "Check if the issue is network-related (DNS, load balancer)"
+      - "Review circuit breaker thresholds (might be too aggressive)"
+      - "If upstream is truly down, activate fallback/degraded mode"
+      - "Set a timer to re-check circuit breaker state (usually auto-resets)"
+
+  - title: "Rollback Procedure"
+    description: "Standard rollback procedure for any service"
+    tags: ["rollback", "deploy", "recovery"]
+    severity: info
+    steps:
+      - "Identify the last known good version from deploy history"
+      - "Run: kubectl rollout undo deployment/<service-name>"
+      - "Monitor error rates for 5 minutes post-rollback"
+      - "If errors persist, the issue may not be deploy-related"
+      - "Notify the team of the rollback and the version reverted to"

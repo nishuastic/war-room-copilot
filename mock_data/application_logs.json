@@ -1,0 +1,64 @@
+{
+  "logs": [
+    {
+      "timestamp": "2024-01-15T14:20:00Z",
+      "service": "checkout-service",
+      "level": "info",
+      "message": "Deployment v2.3.1 started rolling out"
+    },
+    {
+      "timestamp": "2024-01-15T14:22:30Z",
+      "service": "checkout-service",
+      "level": "warn",
+      "message": "Connection pool utilization at 85% for payment-gateway"
+    },
+    {
+      "timestamp": "2024-01-15T14:23:00Z",
+      "service": "checkout-service",
+      "level": "error",
+      "message": "Timeout after 5000ms connecting to payment-gateway: POST /process"
+    },
+    {
+      "timestamp": "2024-01-15T14:23:15Z",
+      "service": "payment-gateway",
+      "level": "error",
+      "message": "Database connection pool exhausted (max=50, active=50, waiting=127)"
+    },
+    {
+      "timestamp": "2024-01-15T14:23:30Z",
+      "service": "checkout-service",
+      "level": "error",
+      "message": "Circuit breaker OPEN for payment-gateway after 15 consecutive failures"
+    },
+    {
+      "timestamp": "2024-01-15T14:24:00Z",
+      "service": "payment-gateway",
+      "level": "error",
+      "message": "FATAL: too many connections for role 'payment_svc' — max 50"
+    },
+    {
+      "timestamp": "2024-01-15T14:24:30Z",
+      "service": "inventory-service",
+      "level": "error",
+      "message": "Deadlock detected: transaction 4521 and 4523 on inventory_items row id=8821"
+    },
+    {
+      "timestamp": "2024-01-15T14:25:00Z",
+      "service": "checkout-service",
+      "level": "error",
+      "message": "Order creation failed: upstream services unavailable (payment-gateway, inventory-service)"
+    },
+    {
+      "timestamp": "2024-01-15T14:25:15Z",
+      "service": "notification-service",
+      "level": "warn",
+      "message": "Order confirmation email queue depth: 2341 (threshold: 500)"
+    },
+    {
+      "timestamp": "2024-01-15T14:25:30Z",
+      "service": "api-gateway",
+      "level": "error",
+      "message": "5xx error rate exceeded 10% threshold: current 23.4%"
+    }
+  ]
+}
