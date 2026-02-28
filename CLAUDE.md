@@ -18,6 +18,7 @@ LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
 OPENAI_API_KEY
 SPEECHMATICS_API_KEY
 ELEVENLABS_API_KEY
+GITHUB_TOKEN
 
 ## File Maintenance Rules
 - After ANY architecture change: update docs/architecture.md (mermaid diagrams)

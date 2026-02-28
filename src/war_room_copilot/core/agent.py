@@ -1,4 +1,4 @@
-"""Stage 1: LiveKit agent with Speechmatics STT, ElevenLabs TTS, and incident reasoning."""
+"""LiveKit agent with Speechmatics STT, ElevenLabs TTS, GitHub tools, and incident reasoning."""
 
 from __future__ import annotations
 
@@ -21,17 +21,27 @@ from livekit.plugins.speechmatics import (
 
 from ..config import (
     AGENT_PROMPT_FILE,
+    DATA_DIR,
     ELEVENLABS_VOICE_ID,
     FOCUS_SPEAKERS,
+    GITHUB_ALLOWED_REPOS,
     K8S_DICTIONARY_FILE,
     LLM_MODEL,
-    DATA_DIR,
     SPEAKERS_FILE,
     VOICEPRINT_CAPTURE_INTERVAL,
     VOICEPRINT_INITIAL_DELAY,
     WAKE_WORD,
 )
 from ..models import SpeakerMetadata
+from ..tools.github import (
+    get_blame,
+    get_commit_diff,
+    get_recent_commits,
+    list_pull_requests,
+    read_file,
+    search_code,
+    search_issues,
+)
 
 load_dotenv()
 
@@ -78,7 +88,12 @@ def load_agent_prompt(room_name: str, known_speakers: list[SpeakerMetadata]) -> 
             "Room: {room_name}. Known speakers: {known_speakers}. Be concise."
         )
     speaker_names = ", ".join(s.label for s in known_speakers) if known_speakers else "none yet"
-    return template.format(room_name=room_name, known_speakers=speaker_names)
+    allowed_repos = ", ".join(GITHUB_ALLOWED_REPOS) if GITHUB_ALLOWED_REPOS else "none configured"
+    return template.format(
+        room_name=room_name,
+        known_speakers=speaker_names,
+        allowed_repos=allowed_repos,
+    )
 
 
 def load_custom_vocab() -> list[AdditionalVocabEntry]:
@@ -96,7 +111,7 @@ def to_speaker_identifiers(speakers: list[SpeakerMetadata]) -> list[SpeakerIdent
     ]
 
 
-class WarRoomAgent(Agent):
+class WarRoomAgent(Agent):  # type: ignore[misc]
     def __init__(self, instructions: str) -> None:
         super().__init__(instructions=instructions)
         self._buffer: list[str] = []
@@ -140,6 +155,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         known_speakers=to_speaker_identifiers(known_speakers),
     )
 
+    github_tools = [
+        search_code,
+        get_recent_commits,
+        get_commit_diff,
+        list_pull_requests,
+        search_issues,
+        read_file,
+        get_blame,
+    ]
+
     session = AgentSession(
         stt=stt,
         llm=openai.LLM(model=LLM_MODEL),
@@ -149,6 +174,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             prefix_padding_duration=0.3,
             activation_threshold=0.45,
         ),
+        tools=github_tools,
     )
 
     await session.start(

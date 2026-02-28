@@ -10,13 +10,18 @@ flowchart LR
         User[Engineer on Call]
     end
 
-    subgraph Stage 1
+    subgraph Agent
         VAD[Silero VAD]
         STT[Speechmatics STT<br/>Enhanced + Custom Vocab]
         WW{Wake Word?<br/>sam}
         Buffer[(Transcript Buffer)]
-        LLM[GPT-4o-mini<br/>Incident Reasoning]
+        LLM[GPT-4.1-mini<br/>Incident Reasoning]
+        Tools[GitHub Tools<br/>search, commits, PRs, blame]
         TTS[ElevenLabs TTS]
+    end
+
+    subgraph External
+        GH[GitHub API]
     end
 
     Config[config.py] -.-> STT
@@ -32,13 +37,17 @@ flowchart LR
     WW -- "no wake word" --> Buffer
     WW -- "wake word detected" --> LLM
     Buffer -. "context injected" .-> LLM
+    LLM -- "tool call" --> Tools
+    Tools -- "PyGitHub (REST)" --> GH
+    GH -- results --> Tools
+    Tools -- "tool result" --> LLM
     LLM -- response --> TTS
     TTS -- audio --> User
 ```
 
-## Current Stage: 1
+## Current Stage: 2
 
-The agent joins a LiveKit room, transcribes speech via Speechmatics (with diarization, speaker identification, enhanced operating point, and custom vocabulary for k8s/infra terms), reasons about the incident via GPT-4o-mini, and speaks back via ElevenLabs TTS.
+The agent joins a LiveKit room, transcribes speech via Speechmatics (with diarization, speaker identification, enhanced operating point, and custom vocabulary for k8s/infra terms), reasons about the incident via GPT-4.1-mini with GitHub tool access, and speaks back via ElevenLabs TTS.
 
 ### Features
 - Speaker diarization (who said what)
@@ -47,7 +56,8 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
 - **Wake word activation** — agent silently buffers conversation and only responds when addressed with `"sam"`, then replies with full context awareness
 - **Custom vocabulary** for Kubernetes, infrastructure, and incident terms (`assets/k8s_dictionary.json`)
 - **Incident reasoning** — asks clarifying questions, identifies unknowns, suggests next steps, flags contradictions
-- **Dynamic prompt** with room name and known speakers injected
+- **GitHub tools** — search code, recent commits, commit diffs, PRs, issues, read files, blame (via PyGitHub REST API)
+- **Dynamic prompt** with room name, known speakers, and allowed repos injected
 - **Centralized config** — all tunables in `config.py`
 
 ### Components
@@ -55,9 +65,10 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
 | Component | File | Purpose |
 |-----------|------|---------|
 | Agent | `src/war_room_copilot/core/agent.py` | LiveKit agent entry point, `WarRoomAgent` class |
-| Config | `src/war_room_copilot/config.py` | Centralized configuration (model, voice, paths, timings) |
+| GitHub Tools | `src/war_room_copilot/tools/github.py` | 7 `@function_tool` functions for GitHub API access |
+| Config | `src/war_room_copilot/config.py` | Centralized configuration (model, voice, paths, repos) |
 | Models | `src/war_room_copilot/models.py` | Pydantic models (`SpeakerMetadata`, `TranscriptSegment`) |
-| Prompt | `assets/agent.md` | Agent system instructions (incident reasoning) |
+| Prompt | `assets/agent.md` | Agent system instructions (incident reasoning + tools) |
 | Dictionary | `assets/k8s_dictionary.json` | Custom vocabulary for Speechmatics STT |
 
 ### Data Flow
@@ -68,8 +79,8 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
 4. `on_user_turn_completed` checks for wake word (`"sam"`):
    - **No wake word**: transcript is buffered silently (`StopResponse` cancels auto-reply)
    - **Wake word detected**: buffered context is injected into the chat context, and the agent responds
-5. Dynamic prompt is built with room name and known speaker names
-6. GPT-4o-mini reasons about the incident and generates a response
+5. Dynamic prompt is built with room name, known speaker names, and allowed repos
+6. GPT-4.1-mini reasons about the incident; may call GitHub tools (search code, commits, PRs, blame) via PyGitHub REST API
 7. ElevenLabs TTS converts response to audio
 8. Audio sent back to LiveKit room
 9. Background task captures speaker voiceprints every 30s for future identification
@@ -80,7 +91,8 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
 |----------|--------|-----------|
 | Voice framework | LiveKit Agents | Real-time, open-source, good Python SDK |
 | STT | Speechmatics (Enhanced) | Enhanced mode for better accuracy, diarization, speaker ID, smart turn detection, custom vocab |
-| LLM | GPT-4o-mini | Fast, cheap, good enough for Stage 1 |
+| LLM | GPT-4.1-mini | Fast, cheap, better tool-calling than 4o-mini |
+| GitHub tools | PyGitHub (REST) | No local cloning needed, `asyncio.to_thread` for non-blocking |
 | TTS | ElevenLabs | Natural voice quality |
 | VAD | Silero | Lightweight, runs locally (ONNX) |
 | Config | Plain Python module | Simple, no framework needed, easy to override |

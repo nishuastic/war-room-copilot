@@ -1,11 +1,11 @@
-"""Stage 1: Centralized configuration for War Room Copilot."""
+"""Centralized configuration for War Room Copilot."""
 
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parents[2]
 
 # LLM
-LLM_MODEL = "gpt-4o-mini"
+LLM_MODEL = "gpt-4.1-mini"
 
 # TTS
 ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
@@ -23,3 +23,6 @@ DATA_DIR = PROJECT_ROOT / ".data"
 SPEAKERS_FILE = DATA_DIR / "speakers.json"
 AGENT_PROMPT_FILE = PROJECT_ROOT / "assets" / "agent.md"
 K8S_DICTIONARY_FILE = PROJECT_ROOT / "assets" / "k8s_dictionary.json"
+
+# GitHub
+GITHUB_ALLOWED_REPOS: list[str] = ["nishuastic/war-room-copilot"]
