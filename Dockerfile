@@ -7,9 +7,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Copy source and assets, then install the project itself
+# Copy source, assets, and README (required by hatchling build), then install the project itself
 COPY src/ src/
 COPY assets/ assets/
+COPY README.md .
 RUN uv sync --frozen --no-dev
 
 # ── Runtime stage: slim image, no build tools ─────────────────────────────────

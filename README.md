@@ -58,7 +58,7 @@ Edit `.env` and set your API keys:
 | --- | --- | --- |
 | `OPENAI_API_KEY` | Yes | LLM reasoning (GPT-4o-mini) |
 | `SPEECHMATICS_API_KEY` | Yes | Speech-to-text with diarization |
-| `ELEVENLABS_API_KEY` | Yes | Text-to-speech |
+| `ELEVEN_API_KEY` | Yes | Text-to-speech (ElevenLabs plugin expects this name) |
 | `GITHUB_TOKEN` | No | GitHub repo access via MCP server |
 | `DEFAULT_REPO_OWNER` | No | Default GitHub org/user for repo context |
 | `DEFAULT_REPO_NAME` | No | Default GitHub repo name |
@@ -134,6 +134,24 @@ async with GitHubMCPClient() as client:
     })
 ```
 
+## Multi-Platform Support
+
+The agent supports swappable meeting platforms via the `--platform` flag. LiveKit is the default; Google Meet and Zoom are stubs ready for implementation.
+
+```bash
+# LiveKit (default)
+uv run python -m src.war_room_copilot.core.agent dev
+uv run python -m src.war_room_copilot.core.agent console
+
+# Google Meet (stub — not yet implemented)
+uv run python -m src.war_room_copilot.core.agent --platform google_meet --meeting-url <url>
+
+# Zoom (stub — not yet implemented)
+uv run python -m src.war_room_copilot.core.agent --platform zoom --meeting-id <id>
+```
+
+See [platforms/base.py](src/war_room_copilot/platforms/base.py) for the `MeetingPlatform` protocol to implement a new platform.
+
 ## Architecture
 
 ```
@@ -153,7 +171,13 @@ src/war_room_copilot/
 ├── config.py                 # Settings (pydantic-settings, auto .env loading)
 ├── models.py                 # Shared Pydantic models (GitHubIssue, RepoContext, etc.)
 ├── core/
-│   └── agent.py              # LiveKit agent entry point (start here)
+│   └── agent.py              # CLI entrypoint (--platform flag)
+├── platforms/
+│   ├── __init__.py            # Platform registry (lazy imports)
+│   ├── base.py                # MeetingPlatform protocol + shared helpers
+│   ├── livekit.py             # LiveKit Agents implementation
+│   ├── google_meet.py         # Google Meet stub
+│   └── zoom.py                # Zoom stub
 └── tools/
     ├── __init__.py            # Re-exports
     ├── github_mcp.py          # Async MCP client (Docker stdio transport)

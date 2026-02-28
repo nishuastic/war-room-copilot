@@ -6,11 +6,12 @@ War Room Copilot is a voice-first AI agent for production incident war rooms.
 
 ```mermaid
 flowchart LR
-    subgraph LiveKit Room
+    subgraph Meeting Platform
         User[Engineer on Call]
+        Platform[LiveKit / Google Meet / Zoom]
     end
 
-    subgraph Stage 0 – Voice Pipeline
+    subgraph Voice Pipeline
         VAD[Silero VAD]
         STT[Speechmatics STT]
         LLM[GPT-4o-mini]
@@ -23,7 +24,8 @@ flowchart LR
         GH[GitHub REST API]
     end
 
-    User -- audio --> VAD
+    User -- audio --> Platform
+    Platform -- audio --> VAD
     VAD -- voice activity --> STT
     STT -- text + speaker ID --> LLM
     LLM -- function calls --> MCP
@@ -31,7 +33,8 @@ flowchart LR
     Docker -- REST --> GH
     MCP -- RepoContext --> LLM
     LLM -- response --> TTS
-    TTS -- audio --> User
+    TTS -- audio --> Platform
+    Platform -- audio --> User
 ```
 
 ## Current Stage: 0 + Tools Foundation
@@ -51,7 +54,11 @@ The **tools layer** is built and ready to wire into the voice pipeline. It provi
 
 | Component          | File                                          | Purpose                                                                        |
 | ------------------ | --------------------------------------------- | ------------------------------------------------------------------------------ |
-| Agent              | `src/war_room_copilot/core/agent.py`          | LiveKit agent entry point, `WarRoomAgent` class                                |
+| CLI Entrypoint     | `src/war_room_copilot/core/agent.py`          | Platform dispatcher (`--platform` flag)                                        |
+| Platform Base      | `src/war_room_copilot/platforms/base.py`      | `MeetingPlatform` protocol, `SpeakerInfo`, shared helpers                      |
+| LiveKit Platform   | `src/war_room_copilot/platforms/livekit.py`    | LiveKit Agents implementation (`WarRoomAgent`, `AgentSession`)                 |
+| Google Meet Stub   | `src/war_room_copilot/platforms/google_meet.py`| Placeholder for Google Meet integration                                        |
+| Zoom Stub          | `src/war_room_copilot/platforms/zoom.py`       | Placeholder for Zoom integration                                              |
 | Prompt             | `assets/agent.md`                             | Agent system instructions                                                      |
 | Config             | `src/war_room_copilot/config.py`              | Centralized settings via `pydantic-settings` (env vars, timeouts, defaults)    |
 | Models             | `src/war_room_copilot/models.py`              | Shared Pydantic models (`GitHubIssue`, `GitHubPR`, `GitHubCommit`, etc.)       |
@@ -108,6 +115,7 @@ sequenceDiagram
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
+| Platform abstraction | `MeetingPlatform` Protocol | Swap LiveKit/Meet/Zoom via `--platform` flag |
 | Voice framework | LiveKit Agents | Real-time, open-source, good Python SDK |
 | STT | Speechmatics | Enhanced mode, diarization, speaker ID, smart turn detection |
 | LLM | GPT-4o-mini | Fast, cheap, good enough for Stage 0 |

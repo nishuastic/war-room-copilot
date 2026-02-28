@@ -6,6 +6,5 @@
 __pycache__/
 docs/
 tests/
-README.md
 CLAUDE.md
 speakers.json
