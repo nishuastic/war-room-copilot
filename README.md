@@ -4,7 +4,7 @@ Voice-first AI agent for production incidents. Listens to war room calls, reason
 
 **Your smartest SRE, always in the room — catches your mistakes and surfaces context you'd spend 30 minutes hunting for.**
 
-## Quick Start (Stage 0)
+## Quick Start (Stage 1)
 
 ### Prerequisites
 - macOS (Apple Silicon or Intel)
@@ -75,8 +75,10 @@ uv run python -m src.war_room_copilot.core.agent console
 ## Architecture
 
 ```
-LiveKit Room → Speechmatics STT (diarization + speaker ID) → GPT-4o-mini → ElevenLabs TTS → LiveKit Room
+LiveKit Room → Speechmatics STT (diarization + speaker ID + custom vocab) → GPT-4o-mini → ElevenLabs TTS → LiveKit Room
 ```
+
+Stage 1 adds incident reasoning (the agent asks clarifying questions and suggests next steps instead of echoing), a custom dictionary (`assets/k8s_dictionary.json`) so Speechmatics correctly transcribes Kubernetes and infrastructure terms, and centralized config.
 
 See [docs/architecture.md](docs/architecture.md) for details.
 
@@ -86,6 +88,9 @@ See [docs/architecture.md](docs/architecture.md) for details.
 src/war_room_copilot/
 ├── core/
 │   └── agent.py          # LiveKit agent entry point (start here)
+├── config.py             # Centralized configuration
+└── models.py             # Pydantic models
 assets/
-└── agent.md              # Agent system prompt
+├── agent.md              # Agent system prompt (incident reasoning)
+└── k8s_dictionary.json   # Custom vocabulary for Speechmatics STT
 ```
