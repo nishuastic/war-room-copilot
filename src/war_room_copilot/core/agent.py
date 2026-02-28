@@ -58,6 +58,21 @@ SPEAKER_TAG = re.compile(r"<(\w+)>(.*?)</\1>", re.DOTALL)
 PASSIVE_WRAP = re.compile(r"<PASSIVE>(.*?)</PASSIVE>", re.DOTALL)
 
 
+def _log_transcript(raw: str) -> None:
+    """Log each speaker's text using a per-speaker logger named ``transcript.<label>``."""
+    # Passive segments first
+    for passive_match in PASSIVE_WRAP.finditer(raw):
+        inner = SPEAKER_TAG.search(passive_match.group(1))
+        if inner:
+            spk = inner.group(1)
+            logging.getLogger(f"transcript.{spk}").info("[%s] (passive) %s", spk, inner.group(2).strip())
+    # Active segments
+    active = PASSIVE_WRAP.sub("", raw)
+    for m in SPEAKER_TAG.finditer(active):
+        spk = m.group(1)
+        logging.getLogger(f"transcript.{spk}").info("[%s] %s", spk, m.group(2).strip())
+
+
 def load_known_speakers() -> list[SpeakerMetadata]:
     if not SPEAKERS_FILE.exists():
         return []
@@ -159,6 +174,7 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
         self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage
     ) -> None:
         raw_text = new_message.text_content or ""
+        _log_transcript(raw_text)
         segment = parse_transcript(raw_text)
 
         # Store in short-term memory and SQLite

@@ -12,8 +12,5 @@ wheels/
 # Environment variables
 .env
 
-# Runtime data
-.data/
-
 # Models
 .models/
