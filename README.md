@@ -25,7 +25,7 @@ print(t.to_jwt())
 "
 ```
 
-Open the [LiveKit Agents Playground](https://agents-playground.livekit.io/), set the URL to `http://localhost:7880`, paste the token, and connect.
+Open the [LiveKit Agents Playground](https://agents-playground.livekit.io/), click **Manual**, set the URL to `ws://localhost:7880`, paste the token, and click **Connect**.
 
 ## Manual Setup (Stage 0)
 
@@ -92,8 +92,8 @@ Copy the printed access token.
 ### 6. Connect from the browser
 
 1. Open the [LiveKit Agents Playground](https://agents-playground.livekit.io/) in Chrome
-2. Click **Settings** (top right)
-3. Set **LiveKit URL** to `http://localhost:7880`
+2. Click **Manual**
+3. Set **URL** to `ws://localhost:7880`
 4. Paste the token into the **Token** field
 5. Click **Connect**
 6. Allow microphone access when prompted
