@@ -4,14 +4,14 @@ Voice-first AI agent for production incidents. Listens to war room calls, reason
 
 **Your smartest SRE, always in the room — catches your mistakes and surfaces context you'd spend 30 minutes hunting for.**
 
-## Quick Start (Stage 0 — Echo Agent)
+## Quick Start (Stage 0)
 
 ### Prerequisites
 - macOS (Apple Silicon or Intel)
 - Python 3.12+
 - [Homebrew](https://brew.sh/)
 - [uv](https://docs.astral.sh/uv/)
-- OpenAI API key
+- API keys: OpenAI, Speechmatics, ElevenLabs
 
 ### 1. Install dependencies
 
@@ -26,7 +26,7 @@ brew install livekit livekit-cli
 cp .env.example .env
 ```
 
-Edit `.env` and set your `OPENAI_API_KEY`. The LiveKit defaults are already configured for local dev.
+Edit `.env` and set your `OPENAI_API_KEY`, `SPEECHMATICS_API_KEY`, and `ELEVENLABS_API_KEY`. The LiveKit defaults are already configured for local dev.
 
 ### 3. Start LiveKit server (Terminal 1)
 
@@ -62,7 +62,7 @@ Copy the printed access token.
 4. Paste the token into the **Token** field
 5. Click **Connect**
 6. Allow microphone access when prompted
-7. Speak — the agent will echo back what you say
+7. Speak — the agent will respond
 
 ### Alternative: Console mode (no browser/server needed)
 
@@ -75,8 +75,10 @@ uv run python -m src.war_room_copilot.core.agent console
 ## Architecture
 
 ```
-LiveKit Room → OpenAI Whisper STT → GPT-4o-mini → OpenAI TTS → LiveKit Room
+LiveKit Room → Speechmatics STT (diarization + speaker ID) → GPT-4o-mini → ElevenLabs TTS → LiveKit Room
 ```
+
+See [docs/architecture.md](docs/architecture.md) for details.
 
 ## Project Structure
 
@@ -84,6 +86,6 @@ LiveKit Room → OpenAI Whisper STT → GPT-4o-mini → OpenAI TTS → LiveKit R
 src/war_room_copilot/
 ├── core/
 │   └── agent.py          # LiveKit agent entry point (start here)
-├── config.py              # Settings and env vars
-└── models.py              # Shared Pydantic models
+assets/
+└── agent.md              # Agent system prompt
 ```

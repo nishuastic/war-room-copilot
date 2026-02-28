@@ -10,107 +10,57 @@ flowchart LR
         User[Engineer on Call]
     end
 
-    subgraph Stage 0 - Echo Agent
-        STT[OpenAI Whisper STT]
+    subgraph Stage 0
+        VAD[Silero VAD]
+        STT[Speechmatics STT]
         LLM[GPT-4o-mini]
-        TTS[OpenAI TTS]
+        TTS[ElevenLabs TTS]
     end
 
-    User -- audio --> STT
-    STT -- text --> LLM
+    User -- audio --> VAD
+    VAD -- voice activity --> STT
+    STT -- text + speaker ID --> LLM
     LLM -- response --> TTS
     TTS -- audio --> User
 ```
 
-## Current Stage: 0 — Echo Agent
+## Current Stage: 0
 
-The agent joins a LiveKit room, transcribes speech via OpenAI Whisper,
-passes it through GPT-4o-mini (echo mode), and speaks back via OpenAI TTS.
+The agent joins a LiveKit room, detects voice activity via Silero VAD, transcribes speech via Speechmatics (with diarization and speaker identification), passes it through GPT-4o-mini, and speaks back via ElevenLabs TTS.
+
+### Features
+- Speaker diarization (who said what)
+- Speaker identification (recognizes returning speakers via voiceprints saved to `speakers.json`)
+- Smart turn detection (knows when someone is done speaking)
+- Personalized greetings for known speakers
 
 ### Components
 
 | Component | File | Purpose |
 |-----------|------|---------|
 | Agent | `src/war_room_copilot/core/agent.py` | LiveKit agent entry point, `WarRoomAgent` class |
-| Config | `src/war_room_copilot/config.py` | Environment variables and thresholds |
-| Models | `src/war_room_copilot/models.py` | Shared Pydantic models |
+| Prompt | `assets/agent.md` | Agent system instructions |
 
 ### Data Flow
 
 1. User speaks into LiveKit room
 2. Silero VAD detects voice activity
-3. OpenAI Whisper transcribes audio to text
-4. GPT-4o-mini generates echo response
-5. OpenAI TTS converts response to audio
+3. Speechmatics transcribes audio to text with speaker labels
+4. GPT-4o-mini generates response
+5. ElevenLabs TTS converts response to audio
 6. Audio sent back to LiveKit room
-
-## Planned Architecture (Full)
-
-```mermaid
-flowchart TB
-    subgraph LiveKit
-        Room[LiveKit Room]
-    end
-
-    subgraph STT
-        Speechmatics[Speechmatics Enhanced]
-    end
-
-    subgraph Processing
-        Buffer[Transcript Buffer]
-        Router[Skill Router]
-        Contradict[Contradiction Detector]
-    end
-
-    subgraph Skills
-        Debug
-        Ideate
-        Investigate
-        Recall
-        Summarize
-    end
-
-    subgraph Memory
-        ShortTerm[Sliding Window]
-        LongTerm[Backboard.io]
-        Decisions[Decision Tracker]
-    end
-
-    subgraph Tools
-        GitHub[GitHub MCP]
-        Datadog[Datadog MCP]
-        Logs[Application Logs]
-        ServiceGraph[Service Graph]
-        Runbooks
-    end
-
-    subgraph Output
-        TTS[OpenAI TTS]
-        Dashboard[React Dashboard]
-    end
-
-    Room --> Speechmatics --> Buffer
-    Buffer --> Router
-    Buffer --> Contradict
-    Router --> Skills
-    Skills --> Tools
-    Skills --> Memory
-    Contradict --> TTS
-    Router -- confidence >= 0.7 --> TTS --> Room
-    Router -- confidence 0.4-0.7 --> Dashboard
-    Buffer --> Dashboard
-```
+7. Background task captures speaker voiceprints every 30s for future identification
 
 ## Tech Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Voice framework | LiveKit Agents | Real-time, open-source, good Python SDK |
-| STT (Stage 0) | OpenAI Whisper | Simple, no extra API key needed |
-| STT (Stage 1+) | Speechmatics | Enhanced mode, diarization, custom dictionary |
-| LLM | OpenAI GPT-4o | Best tool-calling, fast enough for real-time |
-| TTS | OpenAI TTS | Low latency, good quality |
-| VAD | Silero | Lightweight, runs locally |
-| Memory | Backboard.io | Cross-session persistence |
-| Tracing | LangSmith | Production-grade, LangChain ecosystem |
-| Dashboard | React + Vite + Tailwind | Fast dev, WebSocket support |
+| STT | Speechmatics | Enhanced mode, diarization, speaker ID, smart turn detection |
+| LLM | GPT-4o-mini | Fast, cheap, good enough for Stage 0 |
+| TTS | ElevenLabs | Natural voice quality |
+| VAD | Silero | Lightweight, runs locally (ONNX) |
+
+## Planned (Future Stages)
+
+See [PLAN_V0.md](PLAN_V0.md) for the full roadmap: skills router, memory, tools (GitHub, Datadog), dashboard, auto-interjection, contradiction detection.

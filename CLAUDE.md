@@ -1,7 +1,7 @@
 # War Room Copilot — Developer Guide
 
 ## Quick Start
-uv sync && python -m src.war_room_copilot.core.agent
+uv sync && uv run python -m src.war_room_copilot.core.agent dev
 
 ## Linting & Formatting
 uv run ruff check src/ --fix
@@ -15,11 +15,9 @@ uv run pytest tests/ -v
 
 ## Environment Variables
 LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
-SPEECHMATICS_API_KEY
 OPENAI_API_KEY
-BACKBOARD_API_KEY
-LANGSMITH_API_KEY
-GITHUB_TOKEN
+SPEECHMATICS_API_KEY
+ELEVENLABS_API_KEY
 
 ## File Maintenance Rules
 - After ANY architecture change: update docs/architecture.md (mermaid diagrams)

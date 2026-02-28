@@ -13,17 +13,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-all = [
-    "livekit-plugins-speechmatics",
-    "fastapi",
-    "uvicorn[standard]",
-    "websockets",
-    "aiosqlite",
-    "pygithub",
-    "langsmith",
-    "httpx",
-    "pyyaml",
-]
 dev = [
     "ruff",
     "mypy",
