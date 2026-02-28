@@ -65,7 +65,9 @@ def _log_transcript(raw: str) -> None:
         inner = SPEAKER_TAG.search(passive_match.group(1))
         if inner:
             spk = inner.group(1)
-            logging.getLogger(f"transcript.{spk}").info("[%s] (passive) %s", spk, inner.group(2).strip())
+            logging.getLogger(f"transcript.{spk}").info(
+                "[%s] (passive) %s", spk, inner.group(2).strip()
+            )
     # Active segments
     active = PASSIVE_WRAP.sub("", raw)
     for m in SPEAKER_TAG.finditer(active):
@@ -193,7 +195,16 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
         if WAKE_WORD not in segment.text.lower():
             raise StopResponse()
 
-        # Wake word detected — inject buffered context
+        # Wake word detected — emit trace event
+        asyncio.create_task(
+            self._db.add_trace(
+                self._session_id,
+                "wake_word",
+                {"text": segment.text, "speaker_id": segment.speaker_id},
+            )
+        )
+
+        # Inject buffered context
         context = self._memory.format_context()
         if context:
             turn_ctx.add_message(
@@ -288,18 +299,54 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         max_tool_steps=7,
     )
 
+    war_room_agent = WarRoomAgent(
+        instructions=prompt,
+        memory=memory,
+        decision_tracker=decision_tracker,
+        db=db,
+        session_id=session_id,
+        long_term=long_term,
+    )
+
     await session.start(
         room=ctx.room,
-        agent=WarRoomAgent(
-            instructions=prompt,
-            memory=memory,
-            decision_tracker=decision_tracker,
-            db=db,
-            session_id=session_id,
-            long_term=long_term,
-        ),
+        agent=war_room_agent,
         room_input_options=RoomInputOptions(),
     )
+
+    # Trace tool calls and LLM responses via session events
+    @session.on("function_calls_collected")  # type: ignore[misc]
+    def _on_tool_calls(calls: Any) -> None:
+        for call in calls if isinstance(calls, list) else [calls]:
+            tool_name = getattr(call, "function_name", str(call))
+            raw_args = getattr(call, "arguments", {})
+            asyncio.create_task(
+                db.add_trace(session_id, "tool_call", {"tool": tool_name, "args": raw_args})
+            )
+
+    @session.on("function_calls_finished")  # type: ignore[misc]
+    def _on_tool_results(calls: Any) -> None:
+        for call in calls if isinstance(calls, list) else [calls]:
+            tool_name = getattr(call, "function_name", str(call))
+            result_preview = str(getattr(call, "result", ""))[:500]
+            asyncio.create_task(
+                db.add_trace(
+                    session_id, "tool_result", {"tool": tool_name, "result": result_preview}
+                )
+            )
+
+    @session.on("agent_speech_committed")  # type: ignore[misc]
+    def _on_agent_speech(msg: Any) -> None:
+        text = getattr(msg, "content", None) or str(msg)
+        if text:
+            text_str = str(text)[:1000]
+            asyncio.create_task(db.add_trace(session_id, "llm_response", {"text": text_str}))
+            asyncio.create_task(
+                db.add_segment(
+                    session_id,
+                    TranscriptSegment(speaker_id="sam", text=text_str, timestamp=time.time()),
+                )
+            )
 
     async def capture_voiceprints() -> None:
         await asyncio.sleep(VOICEPRINT_INITIAL_DELAY)

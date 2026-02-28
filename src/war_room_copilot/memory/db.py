@@ -1,7 +1,8 @@
-"""SQLite persistence for call metadata, transcript, and decisions."""
+"""SQLite persistence for call metadata, transcript, decisions, and agent trace."""
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,13 @@ CREATE TABLE IF NOT EXISTS decisions (
     confidence REAL NOT NULL,
     context TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS agent_trace (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER REFERENCES sessions(id),
+    event_type TEXT NOT NULL,
+    data TEXT NOT NULL,
+    timestamp REAL NOT NULL
+);
 """
 
 
@@ -46,6 +54,7 @@ class IncidentDB:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = await aiosqlite.connect(self._db_path)
         self._conn.row_factory = aiosqlite.Row
+        await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.executescript(_CREATE_TABLES)
         await self._conn.commit()
 
@@ -118,6 +127,47 @@ class IncidentDB:
             (f"%{query}%", f"%{query}%"),
         )
         return [self._row_to_decision(r) for r in rows]
+
+    async def add_trace(self, session_id: int, event_type: str, data: dict[str, Any]) -> None:
+        await self._db().execute(
+            "INSERT INTO agent_trace (session_id, event_type, data, timestamp) VALUES (?, ?, ?, ?)",
+            (session_id, event_type, json.dumps(data), time.time()),
+        )
+        await self._db().commit()
+
+    async def get_transcript(self, session_id: int) -> list[dict[str, Any]]:
+        rows = await self._db().execute_fetchall(
+            "SELECT * FROM transcript WHERE session_id = ? ORDER BY timestamp ASC",
+            (session_id,),
+        )
+        return [dict(r) for r in rows]
+
+    async def get_transcript_since(self, session_id: int, last_id: int) -> list[dict[str, Any]]:
+        rows = await self._db().execute_fetchall(
+            "SELECT * FROM transcript WHERE session_id = ? AND id > ? ORDER BY id ASC",
+            (session_id, last_id),
+        )
+        return [dict(r) for r in rows]
+
+    async def get_trace_since(self, session_id: int, last_id: int) -> list[dict[str, Any]]:
+        rows = await self._db().execute_fetchall(
+            "SELECT * FROM agent_trace WHERE session_id = ? AND id > ? ORDER BY id ASC",
+            (session_id, last_id),
+        )
+        return [dict(r) for r in rows]
+
+    async def get_session(self, session_id: int) -> dict[str, Any] | None:
+        rows = await self._db().execute_fetchall(
+            "SELECT * FROM sessions WHERE id = ?",
+            (session_id,),
+        )
+        return dict(rows[0]) if rows else None
+
+    async def get_latest_session_id(self) -> int | None:
+        rows = await self._db().execute_fetchall(
+            "SELECT id FROM sessions ORDER BY started_at DESC LIMIT 1",
+        )
+        return rows[0]["id"] if rows else None
 
     async def get_sessions(self) -> list[dict[str, Any]]:
         rows = await self._db().execute_fetchall(

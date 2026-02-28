@@ -10,7 +10,7 @@ flowchart LR
         User[Engineer on Call]
     end
 
-    subgraph Agent
+    subgraph Agent Process
         VAD[Silero VAD]
         STT[Speechmatics STT<br/>Enhanced + Custom Vocab]
         WW{Wake Word?<br/>sam}
@@ -23,7 +23,21 @@ flowchart LR
         STM[Short-Term Memory<br/>Sliding Window]
         LTM[Backboard.io<br/>Cross-Session Memory]
         DT[Decision Tracker<br/>LLM-based Detection]
-        DB[(SQLite<br/>war_room.db)]
+        DB[(SQLite WAL<br/>war_room.db)]
+    end
+
+    subgraph API Process
+        FA[FastAPI<br/>port 8000]
+        REST[REST<br/>GET /sessions<br/>GET /sessions/id/transcript<br/>GET /sessions/id/decisions]
+        SSE[SSE<br/>GET /sessions/id/stream<br/>GET /sessions/id/trace]
+    end
+
+    subgraph Dashboard
+        React[React + Vite<br/>port 5173]
+        TV[Transcript Viewer]
+        AT[Agent Trace]
+        IT[Incident Timeline]
+        DL[Decision List]
     end
 
     subgraph External
@@ -45,6 +59,7 @@ flowchart LR
     WW -- "wake word detected" --> LLM
     STM -. "context injected" .-> LLM
     STM -- segment --> DB
+    STM -- agent_trace --> DB
     STM -- segment --> DT
     DT -- "every 5 segments" --> BB
     DT -- decision --> DB
@@ -58,11 +73,20 @@ flowchart LR
     Tools -- "tool result" --> LLM
     LLM -- response --> TTS
     TTS -- audio --> User
+    DB -- "WAL read" --> FA
+    FA --> REST
+    FA --> SSE
+    REST -- fetch --> React
+    SSE -- EventSource --> React
+    React --> TV
+    React --> AT
+    React --> IT
+    React --> DL
 ```
 
-## Current Stage: 3
+## Current Stage: 6
 
-The agent joins a LiveKit room, transcribes speech via Speechmatics (with diarization, speaker identification, enhanced operating point, and custom vocabulary for k8s/infra terms), stores transcript in structured short-term memory and SQLite, detects decisions via LLM through Backboard, persists cross-session memory via Backboard.io, reasons about the incident via GPT-4.1-mini with GitHub and recall tools, and speaks back via ElevenLabs TTS.
+The agent joins a LiveKit room, transcribes speech via Speechmatics (with diarization, speaker identification, enhanced operating point, and custom vocabulary for k8s/infra terms), stores transcript in structured short-term memory and SQLite, detects decisions via LLM through Backboard, persists cross-session memory via Backboard.io, reasons about the incident via GPT-4.1-mini with GitHub and recall tools, and speaks back via ElevenLabs TTS. Stage 6 adds a read-only observability layer: a FastAPI server (port 8000) exposes the SQLite data via REST + SSE, and a React + Vite dashboard (port 5173) renders it in real time.
 
 ### Features
 - Speaker diarization (who said what)
@@ -90,7 +114,11 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
 | Short-Term Memory | `src/war_room_copilot/memory/short_term.py` | Sliding window of `TranscriptSegment` objects |
 | Long-Term Memory | `src/war_room_copilot/memory/long_term.py` | Backboard.io wrapper for persistent cross-session memory |
 | Decision Tracker | `src/war_room_copilot/memory/decisions.py` | LLM-based decision detection via Backboard |
-| SQLite DB | `src/war_room_copilot/memory/db.py` | `IncidentDB` for sessions, transcript, and decisions |
+| SQLite DB | `src/war_room_copilot/memory/db.py` | `IncidentDB` for sessions, transcript, decisions, and agent_trace (WAL mode) |
+| API Server | `src/war_room_copilot/api/main.py` | FastAPI server — REST + SSE observability layer |
+| REST Routes | `src/war_room_copilot/api/routes/sessions.py` | GET /sessions, /sessions/{id}, /transcript, /decisions |
+| SSE Routes | `src/war_room_copilot/api/routes/stream.py` | SSE /sessions/{id}/stream, /trace, /latest/id |
+| Dashboard | `frontend/` | React + Vite — TranscriptViewer, AgentTrace, IncidentTimeline, DecisionList |
 | Config | `src/war_room_copilot/config.py` | Centralized configuration (model, voice, paths, repos, memory) |
 | Models | `src/war_room_copilot/models.py` | Pydantic models (`SpeakerMetadata`, `TranscriptSegment`, `Decision`) |
 | Prompt | `assets/agent.md` | Agent system instructions (incident reasoning + tools + memory) |

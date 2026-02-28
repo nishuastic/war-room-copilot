@@ -223,6 +223,28 @@ war-room-copilot/
 
 ---
 
+## Future Enhancements
+
+### 1. Smart Wake Word Classification
+- **Current:** simple substring match (`"sam" in text`) — causes false positives ("Sam mentioned it") and misses context
+- **Future:** use a fast LLM to classify "addressing Sam" vs "mentioning Sam"
+- **Options researched:**
+  - **Groq Llama 3.1 8B** (~140-160ms, OpenAI-compatible API, recommended)
+  - **GPT-4.1-nano** (~360-450ms, no extra deps, fallback)
+  - **Local SetFit** (~10-20ms, zero network, needs training examples)
+- Only runs when "sam" is in the text (fast-path skip for 99% of turns)
+
+### 2. Audio Feedback During Tool Calls
+- **Current:** dead silence while agent processes tool calls (GitHub search, etc.)
+- **Future:** play a subtle thinking tone or say "Let me check that..." while tools execute
+- Use LiveKit's session event hooks (`on_tool_call_start` / `on_tool_call_end`)
+
+### 3. Passive Speech Filtering
+- **Current:** `is_passive` is parsed from Speechmatics tags but not used in wake word detection
+- **Future:** passive speech should never trigger the wake word — only buffer it for context
+
+---
+
 ## CLAUDE.md Contents (to create)
 ```markdown
 # War Room Copilot — Developer Guide
