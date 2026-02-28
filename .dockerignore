@@ -1,0 +1,11 @@
+.venv/
+.git/
+.env
+.mypy_cache/
+.claude/
+__pycache__/
+docs/
+tests/
+README.md
+CLAUDE.md
+speakers.json

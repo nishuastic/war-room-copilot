@@ -4,14 +4,40 @@ Voice-first AI agent for production incidents. Listens to war room calls, reason
 
 **Your smartest SRE, always in the room — catches your mistakes and surfaces context you'd spend 30 minutes hunting for.**
 
-## Quick Start (Stage 0)
+## Docker Quick Start (Recommended)
+
+The fastest way to get running — no Python, Homebrew, or LiveKit install needed:
+
+```bash
+cp .env.example .env       # fill in your API keys
+docker compose up --build
+```
+
+Then generate a token and connect:
+
+```bash
+docker compose exec agent python -c "
+from livekit.api import AccessToken, VideoGrants
+t = AccessToken('devkey', 'secret')
+t.with_identity('user1')
+t.with_grants(VideoGrants(room_join=True, room='test-room'))
+print(t.to_jwt())
+"
+```
+
+Open the [LiveKit Agents Playground](https://agents-playground.livekit.io/), set the URL to `http://localhost:7880`, paste the token, and connect.
+
+## Manual Setup (Stage 0)
 
 ### Prerequisites
+
 - macOS (Apple Silicon or Intel)
 - Python 3.12+
 - [Homebrew](https://brew.sh/)
 - [uv](https://docs.astral.sh/uv/)
+- [Docker](https://www.docker.com/) (for GitHub MCP integration)
 - API keys: OpenAI, Speechmatics, ElevenLabs
+- Optional: GitHub personal access token (for repo context)
 
 ### 1. Install dependencies
 
@@ -26,7 +52,18 @@ brew install livekit livekit-cli
 cp .env.example .env
 ```
 
-Edit `.env` and set your `OPENAI_API_KEY`, `SPEECHMATICS_API_KEY`, and `ELEVENLABS_API_KEY`. The LiveKit defaults are already configured for local dev.
+Edit `.env` and set your API keys:
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | Yes | LLM reasoning (GPT-4o-mini) |
+| `SPEECHMATICS_API_KEY` | Yes | Speech-to-text with diarization |
+| `ELEVENLABS_API_KEY` | Yes | Text-to-speech |
+| `GITHUB_TOKEN` | No | GitHub repo access via MCP server |
+| `DEFAULT_REPO_OWNER` | No | Default GitHub org/user for repo context |
+| `DEFAULT_REPO_NAME` | No | Default GitHub repo name |
+
+The LiveKit defaults (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`) are already configured for local dev.
 
 ### 3. Start LiveKit server (Terminal 1)
 
@@ -35,8 +72,6 @@ livekit-server --dev --bind 0.0.0.0
 ```
 
 Wait until you see `starting LiveKit server`. Leave it running.
-
-> **Note:** You must run LiveKit natively via Homebrew (not Docker). Docker causes WebRTC connectivity issues with the browser playground.
 
 ### 4. Start the agent (Terminal 2)
 
@@ -72,20 +107,80 @@ Skip steps 3-6 entirely. Console mode uses your Mac's mic and speakers directly 
 uv run python -m src.war_room_copilot.core.agent console
 ```
 
+## GitHub Integration
+
+The agent can access GitHub repos for incident context (issues, PRs, recent commits, code search) via the official [GitHub MCP server](https://github.com/github/github-mcp-server) running in Docker.
+
+### Setup
+
+1. Ensure Docker is running
+2. Set `GITHUB_TOKEN` in your `.env` file (needs repo read access)
+3. Optionally set `DEFAULT_REPO_OWNER` and `DEFAULT_REPO_NAME` for quick access
+
+### Usage (Python)
+
+```python
+from war_room_copilot.tools import GitHubMCPClient, get_repo_context
+
+# Fetch repo context (issues, PRs, commits)
+async with GitHubMCPClient() as client:
+    ctx = await get_repo_context(client, owner="myorg", repo="myapp")
+    print(ctx.as_prompt_context())  # compact text for LLM injection
+
+# Call any of the 51 GitHub MCP tools directly
+async with GitHubMCPClient() as client:
+    result = await client.call_tool("search_code", {
+        "owner": "myorg", "repo": "myapp", "query": "database connection"
+    })
+```
+
 ## Architecture
 
 ```
 LiveKit Room → Speechmatics STT (diarization + speaker ID) → GPT-4o-mini → ElevenLabs TTS → LiveKit Room
+                                                                  ↕
+                                                        GitHub MCP Server (Docker)
+                                                                  ↕
+                                                           GitHub REST API
 ```
 
-See [docs/architecture.md](docs/architecture.md) for details.
+See [docs/architecture.md](docs/architecture.md) for detailed diagrams and tech decisions.
 
 ## Project Structure
 
 ```
 src/war_room_copilot/
+├── config.py                 # Settings (pydantic-settings, auto .env loading)
+├── models.py                 # Shared Pydantic models (GitHubIssue, RepoContext, etc.)
 ├── core/
-│   └── agent.py          # LiveKit agent entry point (start here)
+│   └── agent.py              # LiveKit agent entry point (start here)
+└── tools/
+    ├── __init__.py            # Re-exports
+    ├── github_mcp.py          # Async MCP client (Docker stdio transport)
+    └── github.py              # High-level facade (get_repo_context)
 assets/
-└── agent.md              # Agent system prompt
+└── agent.md                  # Agent system prompt
+tests/
+└── tools/
+    └── test_github_mcp.py    # Unit + integration tests
+```
+
+## Development
+
+```bash
+# Install with dev dependencies
+uv sync --extra dev
+
+# Lint and format
+uv run ruff check src/ --fix
+uv run ruff format src/
+
+# Type check
+uv run mypy src/
+
+# Run tests (unit only — no Docker needed)
+uv run pytest tests/ -v -k "not live"
+
+# Run all tests (requires Docker + GITHUB_TOKEN)
+uv run pytest tests/ -v
 ```

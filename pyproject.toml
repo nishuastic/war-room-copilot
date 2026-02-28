@@ -10,6 +10,9 @@ dependencies = [
     "livekit-plugins-speechmatics",
     "livekit-plugins-elevenlabs",
     "python-dotenv",
+    "mcp>=1.8",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
 ]
 
 [project.optional-dependencies]
