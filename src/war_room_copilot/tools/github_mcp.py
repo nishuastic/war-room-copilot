@@ -12,7 +12,7 @@ from mcp.client.stdio import stdio_client
 from mcp.types import Tool
 
 from war_room_copilot.config import get_settings
-from war_room_copilot.models import OpenAIFunction, OpenAITool
+from war_room_copilot.models import FunctionSchema, ToolSchema
 
 logger = logging.getLogger("war-room-copilot.tools.github_mcp")
 
@@ -39,15 +39,15 @@ class GitHubRateLimitError(WarRoomToolError):
 # ── Schema conversion ──────────────────────────────────────────────────────────
 
 
-def mcp_tool_to_openai(tool: Tool) -> OpenAITool:
-    """Convert an MCP Tool to an OpenAI function-calling schema.
+def mcp_tool_to_schema(tool: Tool) -> ToolSchema:
+    """Convert an MCP Tool to a function-calling schema.
 
-    MCP uses JSON Schema for inputSchema; OpenAI uses the same format
-    under function.parameters — direct mapping, no transformation needed.
+    MCP uses JSON Schema for inputSchema; LLM providers use the same
+    format under function.parameters — direct mapping, no transformation needed.
     """
-    return OpenAITool(
+    return ToolSchema(
         type="function",
-        function=OpenAIFunction(
+        function=FunctionSchema(
             name=tool.name,
             description=tool.description or "",
             parameters=tool.inputSchema
@@ -66,7 +66,7 @@ class GitHubMCPClient:
     Usage (context manager — preferred for scripts/tests):
 
         async with GitHubMCPClient() as client:
-            tools = client.openai_tools()
+            tools = client.tool_schemas()
             result = await client.call_tool("list_issues", {"owner": "...", "repo": "..."})
 
     Usage (long-lived — used by the LiveKit agent):
@@ -164,13 +164,10 @@ class GitHubMCPClient:
 
     # ── Tool introspection ─────────────────────────────────────────────────────
 
-    def openai_tools(self) -> list[dict[str, Any]]:
-        """Return all MCP tools as OpenAI function-calling dicts.
-
-        Ready to pass directly to ``openai.chat.completions.create(tools=...)``.
-        """
+    def tool_schemas(self) -> list[dict[str, Any]]:
+        """Return all MCP tools as function-calling schema dicts."""
         self._assert_connected()
-        return [mcp_tool_to_openai(t).model_dump() for t in self._tools]
+        return [mcp_tool_to_schema(t).model_dump() for t in self._tools]
 
     def tool_names(self) -> list[str]:
         """Return the names of all available tools."""

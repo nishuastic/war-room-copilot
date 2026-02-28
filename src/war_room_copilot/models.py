@@ -7,22 +7,22 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-# ── OpenAI function-calling schema ─────────────────────────────────────────────
+# ── Function-calling schema (provider-agnostic) ──────────────────────────────
 
 
-class OpenAIFunction(BaseModel):
-    """OpenAI function-calling schema for a single tool."""
+class FunctionSchema(BaseModel):
+    """JSON Schema for a single tool function (used by all LLM providers)."""
 
     name: str
     description: str
     parameters: dict[str, Any]
 
 
-class OpenAITool(BaseModel):
-    """Wrapper matching the OpenAI API tools list format."""
+class ToolSchema(BaseModel):
+    """Wrapper matching the standard tools list format for function calling."""
 
     type: str = "function"
-    function: OpenAIFunction
+    function: FunctionSchema
 
 
 # ── GitHub entities ────────────────────────────────────────────────────────────

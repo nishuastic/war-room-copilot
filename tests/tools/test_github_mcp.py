@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from war_room_copilot.models import OpenAITool
+from war_room_copilot.models import ToolSchema
 from war_room_copilot.tools.github_mcp import (
     GitHubMCPClient,
     GitHubRateLimitError,
     MCPConnectionError,
     MCPServerError,
-    mcp_tool_to_openai,
+    mcp_tool_to_schema,
 )
 
 # ── Schema conversion (pure, no I/O) ──────────────────────────────────────────
@@ -39,11 +39,11 @@ def _make_mock_tool(
     return tool
 
 
-def test_mcp_tool_to_openai_basic() -> None:
+def test_mcp_tool_to_schema_basic() -> None:
     """Maps name, description, and inputSchema correctly."""
-    result = mcp_tool_to_openai(_make_mock_tool())
+    result = mcp_tool_to_schema(_make_mock_tool())
 
-    assert isinstance(result, OpenAITool)
+    assert isinstance(result, ToolSchema)
     assert result.type == "function"
     assert result.function.name == "list_issues"
     assert result.function.description == "List issues in a repository"
@@ -51,18 +51,18 @@ def test_mcp_tool_to_openai_basic() -> None:
     assert "owner" in result.function.parameters["properties"]
 
 
-def test_mcp_tool_to_openai_empty_schema() -> None:
+def test_mcp_tool_to_schema_empty_schema() -> None:
     """Tools without inputSchema get an empty-object schema."""
     tool = _make_mock_tool(name="ping", description="Ping", input_schema=None)
     tool.inputSchema = None
 
-    result = mcp_tool_to_openai(tool)
+    result = mcp_tool_to_schema(tool)
     assert result.function.parameters == {"type": "object", "properties": {}}
 
 
-def test_openai_tools_serializable() -> None:
+def test_tool_schemas_serializable() -> None:
     """model_dump() output must be JSON-serializable."""
-    dumped = mcp_tool_to_openai(_make_mock_tool()).model_dump()
+    dumped = mcp_tool_to_schema(_make_mock_tool()).model_dump()
     json.dumps(dumped)  # should not raise
 
 
@@ -72,7 +72,7 @@ def test_openai_tools_serializable() -> None:
 def test_assert_connected_raises_before_connect() -> None:
     client = GitHubMCPClient(github_token="fake")
     with pytest.raises(MCPConnectionError, match="not connected"):
-        client.openai_tools()
+        client.tool_schemas()
 
 
 def test_tool_names_raises_before_connect() -> None:
@@ -124,15 +124,15 @@ async def test_call_tool_success_returns_content() -> None:
     assert hasattr(result[0], "text")
 
 
-# ── openai_tools() with mocked tools ──────────────────────────────────────────
+# ── tool_schemas() with mocked tools ──────────────────────────────────────────
 
 
-def test_openai_tools_converts_all() -> None:
+def test_tool_schemas_converts_all() -> None:
     client = GitHubMCPClient(github_token="fake")
     client._session = MagicMock()  # pretend connected
     client._tools = [_make_mock_tool("t1", "Tool 1"), _make_mock_tool("t2", "Tool 2")]
 
-    tools = client.openai_tools()
+    tools = client.tool_schemas()
     assert len(tools) == 2
     assert tools[0]["function"]["name"] == "t1"
     assert tools[1]["function"]["name"] == "t2"
@@ -152,5 +152,5 @@ async def test_connect_and_list_tools_live() -> None:
         assert len(tools) > 0
         # Verify at least some expected tools exist
         assert any("issue" in t for t in tools)
-        openai_tools = client.openai_tools()
-        assert all(t["type"] == "function" for t in openai_tools)
+        tool_schemas = client.tool_schemas()
+        assert all(t["type"] == "function" for t in tool_schemas)

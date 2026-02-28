@@ -19,9 +19,15 @@ class Settings(BaseSettings):
     livekit_api_key: str = Field(default="")
     livekit_api_secret: str = Field(default="")
 
-    # Speech / LLM
+    # LLM provider
+    llm_provider: str = Field(default="openai")  # "openai" | "anthropic" | "google"
+    llm_model: str = Field(default="")  # empty = use provider default
+
+    # Speech / LLM API keys
     speechmatics_api_key: str = Field(default="")
     openai_api_key: str = Field(default="")
+    anthropic_api_key: str = Field(default="")
+    google_api_key: str = Field(default="")
     elevenlabs_api_key: str = Field(default="")
 
     # Integrations

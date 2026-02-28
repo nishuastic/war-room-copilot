@@ -17,9 +17,18 @@ dependencies = [
     "mcp>=1.8",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
+    "langgraph>=0.2",
+    "langchain-openai>=0.3",
+    "langchain-anthropic>=0.3",
 ]
 
 [project.optional-dependencies]
+anthropic = ["livekit-plugins-anthropic"]
+google = ["livekit-plugins-google"]
+all-llm = [
+    "livekit-plugins-anthropic",
+    "livekit-plugins-google",
+]
 dev = [
     "ruff",
     "mypy",

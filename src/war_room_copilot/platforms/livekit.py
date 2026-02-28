@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from livekit import agents
 from livekit.agents import Agent, AgentSession, RoomInputOptions
-from livekit.plugins import elevenlabs, openai, silero, speechmatics
+from livekit.plugins import elevenlabs, openai as _openai_plugin, silero, speechmatics  # noqa: F401
 from livekit.plugins.speechmatics import SpeakerIdentifier, TurnDetectionMode
 
+from war_room_copilot.graph.incident_graph import incident_graph
+from war_room_copilot.graph.nodes.github_research import close_mcp_client
+from war_room_copilot.llm import create_llm
 from war_room_copilot.platforms.base import (
     SpeakerInfo,
     load_agent_prompt,
@@ -19,6 +23,17 @@ from war_room_copilot.platforms.base import (
 
 logger = logging.getLogger("war-room-copilot.platforms.livekit")
 
+# Persistent state shared across graph invocations within a session.
+# This accumulates transcript, findings, and decisions over the lifetime
+# of the agent — giving the graph memory across multiple tool calls.
+_session_state: dict[str, Any] = {
+    "transcript": [],
+    "findings": [],
+    "decisions": [],
+    "speakers": {},
+    "messages": [],
+}
+
 
 def _to_livekit_speakers(speakers: list[SpeakerInfo]) -> list[SpeakerIdentifier]:
     """Convert platform-agnostic SpeakerInfo to LiveKit's SpeakerIdentifier."""
@@ -26,6 +41,35 @@ def _to_livekit_speakers(speakers: list[SpeakerInfo]) -> list[SpeakerIdentifier]
         SpeakerIdentifier(label=s.label, speaker_identifiers=s.speaker_identifiers)
         for s in speakers
     ]
+
+
+async def _invoke_graph(query: str) -> str:
+    """Run the incident graph with the current session state.
+
+    The graph routes the query to the appropriate skill (investigate,
+    summarize, recall, respond) and returns the final result text.
+    State is accumulated across calls so the graph has memory.
+    """
+    input_state = {
+        **_session_state,
+        "query": query,
+    }
+
+    result = await incident_graph.ainvoke(input_state)
+
+    # Persist accumulated state for next invocation
+    _session_state["findings"] = result.get("findings", _session_state["findings"])
+    _session_state["decisions"] = result.get("decisions", _session_state["decisions"])
+    _session_state["messages"] = result.get("messages", _session_state["messages"])
+
+    # Extract the last AI message as the response text
+    messages = result.get("messages", [])
+    if messages:
+        last = messages[-1]
+        content = getattr(last, "content", str(last))
+        if isinstance(content, str):
+            return content
+    return "I processed your request but have no additional information."
 
 
 class WarRoomAgent(Agent):
@@ -41,6 +85,10 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
     known_speakers = load_known_speakers()
     lk_speakers = _to_livekit_speakers(known_speakers)
 
+    # Seed session state with known speakers
+    for s in known_speakers:
+        _session_state["speakers"][s.label] = s.label
+
     stt = speechmatics.STT(
         turn_detection_mode=TurnDetectionMode.SMART_TURN,
         enable_diarization=True,
@@ -52,7 +100,7 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
 
     session = AgentSession(  # type: ignore[var-annotated]
         stt=stt,
-        llm=openai.LLM(model="gpt-4o-mini"),
+        llm=create_llm(),
         tts=elevenlabs.TTS(voice_id="21m00Tcm4TlvDq8ikWAM"),
         vad=silero.VAD.load(),
     )
@@ -104,4 +152,4 @@ class LiveKitPlatform:
         agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=_entrypoint))
 
     async def shutdown(self) -> None:
-        pass
+        await close_mcp_client()

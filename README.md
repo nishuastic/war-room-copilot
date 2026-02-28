@@ -56,12 +56,24 @@ Edit `.env` and set your API keys:
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | Yes | LLM reasoning (GPT-4o-mini) |
+| `LLM_PROVIDER` | No | LLM provider: `openai` (default), `anthropic`, or `google` |
+| `LLM_MODEL` | No | Model name (defaults: `gpt-4o-mini`, `claude-sonnet-4-20250514`, `gemini-2.0-flash`) |
+| `OPENAI_API_KEY` | Yes* | OpenAI API key (*required when using OpenAI provider) |
+| `ANTHROPIC_API_KEY` | No* | Anthropic API key (*required when using Anthropic provider) |
+| `GOOGLE_API_KEY` | No* | Google API key (*required when using Google provider) |
 | `SPEECHMATICS_API_KEY` | Yes | Speech-to-text with diarization |
 | `ELEVEN_API_KEY` | Yes | Text-to-speech (ElevenLabs plugin expects this name) |
 | `GITHUB_TOKEN` | No | GitHub repo access via MCP server |
 | `DEFAULT_REPO_OWNER` | No | Default GitHub org/user for repo context |
 | `DEFAULT_REPO_NAME` | No | Default GitHub repo name |
+
+To use a non-default LLM provider, install its plugin extras:
+
+```bash
+uv pip install -e ".[anthropic]"   # for Anthropic/Claude
+uv pip install -e ".[google]"      # for Google/Gemini
+uv pip install -e ".[all-llm]"     # for all providers
+```
 
 The LiveKit defaults (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`) are already configured for local dev.
 
@@ -155,27 +167,41 @@ See [platforms/base.py](src/war_room_copilot/platforms/base.py) for the `Meeting
 ## Architecture
 
 ```
-LiveKit Room → Speechmatics STT (diarization + speaker ID) → GPT-4o-mini → ElevenLabs TTS → LiveKit Room
-                                                                  ↕
-                                                        GitHub MCP Server (Docker)
-                                                                  ↕
-                                                           GitHub REST API
+Voice Loop (real-time):
+  LiveKit Room → Silero VAD → Speechmatics STT → Voice LLM → ElevenLabs TTS → LiveKit Room
+
+Reasoning Loop (async, via LangGraph):
+  Voice LLM → Skill Router → [investigate | summarize | recall | respond] → result back to Voice LLM
+                                    ↕                                           ↕
+                              GitHub MCP (Docker)                     IncidentState (memory)
 ```
 
-See [docs/architecture.md](docs/architecture.md) for detailed diagrams and tech decisions.
+See [docs/architecture.md](docs/architecture.md) for detailed diagrams, Mermaid charts, and tech decisions.
 
 ## Project Structure
 
 ```
 src/war_room_copilot/
 ├── config.py                 # Settings (pydantic-settings, auto .env loading)
+├── llm.py                    # Voice LLM factory (OpenAI / Anthropic / Google)
 ├── models.py                 # Shared Pydantic models (GitHubIssue, RepoContext, etc.)
 ├── core/
 │   └── agent.py              # CLI entrypoint (--platform flag)
+├── graph/                     # LangGraph reasoning layer
+│   ├── __init__.py            # Public API (incident_graph, IncidentState)
+│   ├── state.py               # IncidentState TypedDict (shared memory)
+│   ├── llm.py                 # LangChain LLM factory for graph nodes
+│   ├── incident_graph.py      # Graph definition: router → skill nodes → END
+│   └── nodes/
+│       ├── skill_router.py    # Intent classification (investigate/summarize/recall/respond)
+│       ├── github_research.py # GitHub code + issue search via MCP
+│       ├── summarize.py       # Incident summary from accumulated state
+│       ├── recall.py          # Memory search for past decisions
+│       └── respond.py         # General conversation with context
 ├── platforms/
 │   ├── __init__.py            # Platform registry (lazy imports)
 │   ├── base.py                # MeetingPlatform protocol + shared helpers
-│   ├── livekit.py             # LiveKit Agents implementation
+│   ├── livekit.py             # LiveKit Agents + LangGraph bridge (_invoke_graph)
 │   ├── google_meet.py         # Google Meet stub
 │   └── zoom.py                # Zoom stub
 └── tools/

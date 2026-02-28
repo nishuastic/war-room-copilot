@@ -9,7 +9,7 @@ from war_room_copilot.tools.github_mcp import (
     MCPConnectionError,
     MCPServerError,
     WarRoomToolError,
-    mcp_tool_to_openai,
+    mcp_tool_to_schema,
 )
 
 __all__ = [
@@ -19,5 +19,5 @@ __all__ = [
     "MCPServerError",
     "WarRoomToolError",
     "get_repo_context",
-    "mcp_tool_to_openai",
+    "mcp_tool_to_schema",
 ]
