@@ -14,6 +14,8 @@ flowchart LR
         VAD[Silero VAD]
         STT[Speechmatics STT<br/>Enhanced + Custom Vocab]
         WW{Wake Word?<br/>sam}
+        SR[Skill Router<br/>GPT-4.1-nano]
+        CG{Confidence<br/>Gate}
         LLM[GPT-4.1-mini<br/>Incident Reasoning]
         Tools[GitHub Tools<br/>search, commits, PRs, blame]
         TTS[ElevenLabs TTS]
@@ -56,7 +58,11 @@ flowchart LR
     VAD -- voice activity --> STT
     STT -- text + speaker ID --> WW
     WW -- "no wake word" --> STM
-    WW -- "wake word detected" --> LLM
+    WW -- "wake word detected" --> SR
+    SR --> CG
+    CG -- "< 0.4 discard" --> STM
+    CG -- "0.4–0.7 silent" --> BB
+    CG -- "> 0.7 speak" --> LLM
     STM -. "context injected" .-> LLM
     STM -- segment --> DB
     STM -- agent_trace --> DB
@@ -84,9 +90,9 @@ flowchart LR
     React --> DL
 ```
 
-## Current Stage: 6
+## Current Stage: 7
 
-The agent joins a LiveKit room, transcribes speech via Speechmatics (with diarization, speaker identification, enhanced operating point, and custom vocabulary for k8s/infra terms), stores transcript in structured short-term memory and SQLite, detects decisions via LLM through Backboard, persists cross-session memory via Backboard.io, reasons about the incident via GPT-4.1-mini with GitHub and recall tools, and speaks back via ElevenLabs TTS. Stage 6 adds a read-only observability layer: a FastAPI server (port 8000) exposes the SQLite data via REST + SSE, and a React + Vite dashboard (port 5173) renders it in real time.
+The agent joins a LiveKit room, transcribes speech via Speechmatics (with diarization, speaker identification, enhanced operating point, and custom vocabulary for k8s/infra terms), stores transcript in structured short-term memory and SQLite, detects decisions via LLM through Backboard, persists cross-session memory via Backboard.io, reasons about the incident via GPT-4.1-mini with GitHub and recall tools, and speaks back via ElevenLabs TTS. Stage 6 adds a read-only observability layer: a FastAPI server (port 8000) exposes the SQLite data via REST + SSE, and a React + Vite dashboard (port 5173) renders it in real time. Stage 7 adds **intent-based skill routing** — a fast GPT-4.1-nano classifier determines whether a request is debug, ideate, investigate, recall, summarize, or general, then applies a specialized prompt suffix. Confidence gating controls whether the agent speaks (>0.7), silently pushes insights to the dashboard (0.4–0.7), or discards (<0.4).
 
 ### Features
 - Speaker diarization (who said what)
@@ -102,6 +108,8 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
 - **SQLite persistence** — local store for call metadata, transcript history, and decisions (`.data/war_room.db`)
 - **Recall tool** — `recall_decision` function tool for querying past decisions across sessions
 - **Dynamic prompt** with room name, known speakers, and allowed repos injected
+- **Skill routing** — LLM-based intent classification (6 skills) with confidence gating (speak / silent dashboard push / discard)
+- **Multi-LLM ready** — per-skill model config in `config.py` (all default to GPT-4.1-mini, easily swappable)
 - **Centralized config** — all tunables in `config.py`
 
 ### Components
@@ -109,6 +117,8 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
 | Component | File | Purpose |
 |-----------|------|---------|
 | Agent | `src/war_room_copilot/core/agent.py` | LiveKit agent entry point, `WarRoomAgent` class |
+| Skill Router | `src/war_room_copilot/skills/router.py` | Intent classification via GPT-4.1-nano (debug, ideate, investigate, recall, summarize, general) |
+| Skill Prompts | `src/war_room_copilot/skills/prompts.py` | Per-skill prompt suffixes appended to base agent.md |
 | GitHub Tools | `src/war_room_copilot/tools/github.py` | 7 `@function_tool` functions for GitHub API access |
 | Recall Tool | `src/war_room_copilot/tools/recall.py` | `recall_decision` function tool for querying past decisions |
 | Short-Term Memory | `src/war_room_copilot/memory/short_term.py` | Sliding window of `TranscriptSegment` objects |
@@ -135,14 +145,19 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
    - Fires decision check every 5 segments via Backboard LLM (non-blocking)
 5. Wake word check (`"sam"`):
    - **No wake word**: `StopResponse` cancels auto-reply
-   - **Wake word detected**: buffered context from short-term memory is injected into chat context, then cleared
-6. Dynamic prompt is built with room name, known speaker names, and allowed repos
-7. GPT-4.1-mini reasons about the incident; may call GitHub tools or `recall_decision`
-8. `recall_decision` searches SQLite (local decisions) + Backboard (cross-session memory)
-9. ElevenLabs TTS converts response to audio
-10. Audio sent back to LiveKit room
-11. Background task captures speaker voiceprints every 30s for future identification
-12. On disconnect: session end time stored, resources cleaned up
+   - **Wake word detected**: proceeds to skill routing
+6. Skill Router (GPT-4.1-nano) classifies intent into one of 6 skills with confidence score
+7. Confidence gating:
+   - **< 0.4**: discard silently
+   - **0.4–0.7**: run skill via Backboard (silent), push result to dashboard via `silent_skill_response` trace
+   - **> 0.7**: apply skill-specific prompt suffix, inject context, let pipeline speak
+8. Dynamic prompt is built with room name, known speaker names, allowed repos, and skill suffix
+9. GPT-4.1-mini reasons about the incident; may call GitHub tools or `recall_decision`
+10. `recall_decision` searches SQLite (local decisions) + Backboard (cross-session memory)
+11. ElevenLabs TTS converts response to audio
+12. Audio sent back to LiveKit room
+13. Background task captures speaker voiceprints every 30s for future identification
+14. On disconnect: session end time stored, resources cleaned up
 
 ## Tech Decisions
 
@@ -158,6 +173,7 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
 | Long-term memory | Backboard.io | LLM routing + auto memory, persistent across sessions |
 | Decision detection | LLM via Backboard | No brittle regex patterns, understands context |
 | Local persistence | SQLite (aiosqlite) | Lightweight, async, no server needed |
+| Skill classification | GPT-4.1-nano | Fast (~300ms), cheap, LLM-based over keywords for intent nuance |
 | Config | Plain Python module | Simple, no framework needed, easy to override |
 | Models | Pydantic | Type safety at boundaries, validation |
 

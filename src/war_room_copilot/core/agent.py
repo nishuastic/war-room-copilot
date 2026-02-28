@@ -23,6 +23,8 @@ from livekit.plugins.speechmatics import (
 
 from ..config import (
     AGENT_PROMPT_FILE,
+    CONFIDENCE_DASHBOARD,
+    CONFIDENCE_SPEAK,
     DATA_DIR,
     DB_FILE,
     ELEVENLABS_VOICE_ID,
@@ -31,6 +33,7 @@ from ..config import (
     K8S_DICTIONARY_FILE,
     LLM_MODEL,
     SHORT_TERM_WINDOW_SIZE,
+    SKILL_LLM_MODELS,
     SPEAKERS_FILE,
     VOICEPRINT_CAPTURE_INTERVAL,
     VOICEPRINT_INITIAL_DELAY,
@@ -38,6 +41,7 @@ from ..config import (
 )
 from ..memory import DecisionTracker, IncidentDB, LongTermMemory, ShortTermMemory
 from ..models import SpeakerMetadata, TranscriptSegment
+from ..skills import SKILL_PROMPTS, SkillResult, SkillRouter
 from ..tools.github import (
     get_blame,
     get_commit_diff,
@@ -164,13 +168,51 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
         db: IncidentDB,
         session_id: int,
         long_term: LongTermMemory | None,
+        router: SkillRouter,
     ) -> None:
         super().__init__(instructions=instructions)
+        self._base_instructions = instructions
         self._memory = memory
         self._decision_tracker = decision_tracker
         self._db = db
         self._session_id = session_id
         self._long_term = long_term
+        self._router = router
+
+    async def _run_silent_skill(
+        self, context: str, user_message: str, skill_result: SkillResult
+    ) -> None:
+        """Run a skill via Backboard outside the LiveKit pipeline (medium confidence path)."""
+        if self._long_term is None:
+            logger.warning("Silent skill skipped — no Backboard connection")
+            return
+
+        skill_prompt = SKILL_PROMPTS.get(skill_result.skill, "")
+        prompt = (
+            f"{skill_prompt}\n\n"
+            f"Context:\n{context}\n\n"
+            f"User said: {user_message}\n\n"
+            "Provide a concise analysis."
+        )
+        provider, model = SKILL_LLM_MODELS.get(skill_result.skill.value, ("openai", LLM_MODEL))
+
+        try:
+            response = await self._long_term.store(prompt, send_to_llm=True)
+            await self._db.add_trace(
+                self._session_id,
+                "silent_skill_response",
+                {
+                    "skill": skill_result.skill.value,
+                    "confidence": skill_result.confidence,
+                    "reasoning": skill_result.reasoning,
+                    "llm_provider": provider,
+                    "model": model,
+                    "response": (response or "")[:1000],
+                },
+            )
+            logger.info("Silent skill (%s) response written to trace", skill_result.skill.value)
+        except Exception:
+            logger.exception("Silent skill failed for %s", skill_result.skill.value)
 
     async def on_user_turn_completed(
         self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage
@@ -204,8 +246,45 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
             )
         )
 
-        # Inject buffered context
+        # --- Skill routing ---
+        # Reset instructions to base before classification
+        await self.update_instructions(self._base_instructions)
+
         context = self._memory.format_context()
+        skill_result = await self._router.classify(context, segment.text)
+
+        # Log skill route trace
+        asyncio.create_task(
+            self._db.add_trace(
+                self._session_id,
+                "skill_route",
+                {
+                    "skill": skill_result.skill.value,
+                    "confidence": skill_result.confidence,
+                    "reasoning": skill_result.reasoning,
+                    "text": segment.text,
+                },
+            )
+        )
+
+        # Confidence gating
+        if skill_result.confidence < CONFIDENCE_DASHBOARD:
+            # Low confidence — discard silently
+            self._memory.clear()
+            raise StopResponse()
+
+        if skill_result.confidence < CONFIDENCE_SPEAK:
+            # Medium confidence — run skill silently, push to dashboard
+            asyncio.create_task(self._run_silent_skill(context, segment.text, skill_result))
+            self._memory.clear()
+            raise StopResponse()
+
+        # High confidence — apply skill prompt and let pipeline proceed
+        skill_prompt = SKILL_PROMPTS.get(skill_result.skill, "")
+        if skill_prompt:
+            await self.update_instructions(self._base_instructions + skill_prompt)
+
+        # Inject buffered context
         if context:
             turn_ctx.add_message(
                 role="user",
@@ -299,6 +378,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         max_tool_steps=7,
     )
 
+    router = SkillRouter()
+
     war_room_agent = WarRoomAgent(
         instructions=prompt,
         memory=memory,
@@ -306,6 +387,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         db=db,
         session_id=session_id,
         long_term=long_term,
+        router=router,
     )
 
     await session.start(

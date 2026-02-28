@@ -115,7 +115,7 @@ uv run python -m src.war_room_copilot.core.agent console
 LiveKit Room → Speechmatics STT (diarization + speaker ID + custom vocab) → GPT-4.1-mini (+ GitHub tools) → ElevenLabs TTS → LiveKit Room
 ```
 
-Stage 1 adds incident reasoning, custom STT dictionary, centralized config, and a wake word (`"sam"`). Stage 2 adds **GitHub tools** (search code, commits, PRs, files, blame) via PyGitHub and upgrades the LLM to **GPT-4.1-mini**. Stage 3 adds **memory and decision tracking** — structured short-term transcript memory, Backboard.io for cross-session recall, LLM-based decision detection, and SQLite persistence. Stage 6 adds a **real-time dashboard** — FastAPI REST + SSE server backed by SQLite WAL, and a React + Vite frontend showing live transcript, agent trace, incident timeline, and decisions.
+Stage 1 adds incident reasoning, custom STT dictionary, centralized config, and a wake word (`"sam"`). Stage 2 adds **GitHub tools** (search code, commits, PRs, files, blame) via PyGitHub and upgrades the LLM to **GPT-4.1-mini**. Stage 3 adds **memory and decision tracking** — structured short-term transcript memory, Backboard.io for cross-session recall, LLM-based decision detection, and SQLite persistence. Stage 6 adds a **real-time dashboard** — FastAPI REST + SSE server backed by SQLite WAL, and a React + Vite frontend showing live transcript, agent trace, incident timeline, and decisions. Stage 7 adds **skill routing** — a fast GPT-4.1-nano classifier routes each request to a specialized skill (debug, ideate, investigate, recall, summarize, general) with confidence gating that controls whether the agent speaks aloud, silently pushes insights to the dashboard, or discards low-confidence results.
 
 See [docs/architecture.md](docs/architecture.md) for details.
 
@@ -164,6 +164,10 @@ src/war_room_copilot/
 │   └── routes/
 │       ├── sessions.py   # REST: GET /sessions, /transcript, /decisions
 │       └── stream.py     # SSE: /stream, /trace, /latest/id
+├── skills/
+│   ├── models.py         # Skill enum + SkillResult model
+│   ├── prompts.py        # Per-skill prompt suffixes
+│   └── router.py         # Intent classification via GPT-4.1-nano
 ├── tools/
 │   ├── github.py         # GitHub tools (search, commits, PRs, blame)
 │   └── recall.py         # Decision recall tool

@@ -7,6 +7,22 @@ PROJECT_ROOT = Path(__file__).parents[2]
 # LLM
 LLM_MODEL = "gpt-4.1-mini"
 
+# Skill router
+ROUTER_MODEL = "gpt-4.1-nano"
+ROUTER_TIMEOUT = 2.0  # seconds
+CONFIDENCE_SPEAK = 0.7
+CONFIDENCE_DASHBOARD = 0.4
+
+# Per-skill LLM models — (provider, model) tuples, easily swappable per-skill
+SKILL_LLM_MODELS: dict[str, tuple[str, str]] = {
+    "debug": ("openai", "gpt-4.1-mini"),
+    "ideate": ("openai", "gpt-4.1-mini"),
+    "investigate": ("openai", "gpt-4.1-mini"),
+    "recall": ("openai", "gpt-4.1-mini"),
+    "summarize": ("openai", "gpt-4.1-mini"),
+    "general": ("openai", "gpt-4.1-mini"),
+}
+
 # TTS
 ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 
