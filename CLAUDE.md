@@ -136,6 +136,13 @@ The agent connects to the MCP sidecar over Docker's internal network — no Dock
 13. **Docker logging requires `PYTHONUNBUFFERED=1`** — without it, Python block-buffers stdout in non-TTY containers and logs vanish. Always set in Dockerfile.
 14. **Use `start` not `dev` in Docker** — `dev` mode uses watchfiles which spawns child processes via `multiprocessing.spawn`; their stdout goes to internal pipes that Docker can't capture. `start` runs directly and logs are visible. Reserve `dev` for local terminal use only.
 15. **GitHub MCP is a sidecar** — the MCP server runs in its own container and the agent connects via HTTP (`GITHUB_MCP_URL`). No Docker socket mount needed.
+16. **`docker compose restart` does NOT re-read `.env`** — `restart` reuses the existing container with its original environment. To pick up `.env` changes, use `docker compose up -d <service>` which recreates the container. Verify with `docker compose exec agent printenv VAR_NAME`.
+17. **LiveKit dev mode: one agent per room** — in `--dev` mode, LiveKit dispatches exactly one agent per room and won't re-dispatch if the room persists. Use a fresh room name or do a full `docker compose down && docker compose up -d` to clear state.
+18. **Stale worker dispatch after container recreation** — if you recreate the agent container while LiveKit server keeps running, the server may dispatch jobs to the dead worker from the old container. Fix: full stack restart (`docker compose down && docker compose up -d`).
+19. **LiveKit child process crashes are silent** — LiveKit agents use `multiprocessing.forkserver`; child process stdout/stderr goes to internal pipes invisible to Docker. To debug crashes, write to a file in `/app/data/` (Docker volume) and inspect with `docker compose exec agent cat /app/data/debug.log`.
+20. **`node_ip` in livekit.yaml is your LAN IP** — it must be reachable from both the browser (host) and the agent container. Find it with `ipconfig getifaddr en0`. It changes when you switch WiFi networks, so update it when your IP changes.
+21. **LiveKit Agents Playground caches connection state** — after disconnecting, the Manual tab may not show URL/token fields. Open a new browser tab to get a fresh Playground instance.
+22. **`github-mcp-server` is distroless** — it has no shell, wget, or curl, so Docker healthchecks that exec commands will fail. Use `service_started` condition instead of `service_healthy` in `depends_on`.
 
 ## File Maintenance Rules
 

@@ -166,3 +166,62 @@ docker compose exec agent ls /app/data/
 ```
 
 To wipe all data: `docker compose down -v`
+
+## Troubleshooting
+
+### Changed `.env` but agent still uses old values
+
+`docker compose restart` reuses the existing container environment. Use `docker compose up -d agent` to recreate the container with fresh env vars. Verify with:
+
+```bash
+docker compose exec agent printenv LLM_PROVIDER
+```
+
+### Agent doesn't join after reconnecting to the same room
+
+LiveKit dev mode dispatches one agent per room. Once dispatched, reconnecting to the same room won't trigger a new agent. Either use a fresh room name or do a full restart:
+
+```bash
+docker compose down && docker compose up -d
+```
+
+### Agent connects briefly then disconnects (stale worker)
+
+If you recreate the agent container while LiveKit server keeps running, the server may dispatch jobs to the dead worker from the old container. Fix with a full stack restart:
+
+```bash
+docker compose down && docker compose up -d
+```
+
+### No agent logs visible at all (silent crash)
+
+LiveKit agents use `multiprocessing.forkserver` — child process stdout/stderr goes to internal pipes invisible to Docker. To debug, write to a file in the Docker volume:
+
+```python
+# Temporary debug wrapper in _entrypoint
+import traceback
+try:
+    # ... existing code ...
+except Exception:
+    with open("/app/data/agent_crash.log", "w") as f:
+        traceback.print_exc(file=f)
+    raise
+```
+
+Then inspect: `docker compose exec agent cat /app/data/agent_crash.log`
+
+### WebRTC not connecting (no audio/video)
+
+The `node_ip` in `livekit.yaml` must be your host's current LAN IP (reachable from both the browser and the agent container). Find it and update:
+
+```bash
+ipconfig getifaddr en0          # macOS — get current LAN IP
+# Update livekit.yaml with the new IP, then:
+docker compose restart livekit-server
+```
+
+This IP changes when you switch WiFi networks.
+
+### LiveKit Playground doesn't show URL/token fields after disconnecting
+
+The Playground caches connection state in memory. Open a new browser tab to get a fresh instance.

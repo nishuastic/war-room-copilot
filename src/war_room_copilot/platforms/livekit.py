@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from livekit import agents
+from livekit import agents, api
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -31,6 +31,9 @@ from war_room_copilot.platforms.base import (
 )
 
 logger = logging.getLogger("war-room-copilot.platforms.livekit")
+
+# Rooms with no participants older than this are purged on worker startup.
+_STALE_ROOM_AGE_SECONDS = 120
 
 # Maximum accumulated items before oldest entries are trimmed.
 _MAX_TRANSCRIPT = 500
@@ -186,6 +189,39 @@ async def reason_tool(ctx: RunContext, query: str) -> str:  # type: ignore[type-
         return f"Sorry, I encountered an error: {err_detail}"
 
 
+async def _purge_stale_rooms(proc: agents.JobProcess) -> None:
+    """Prewarm callback: delete empty rooms left over from previous sessions.
+
+    Runs once when each worker process initializes — before any job is accepted.
+    This ensures stale rooms (from crashed agents or unclean disconnects) don't
+    block new dispatch.
+    """
+    cfg = get_settings()
+    lk_api = api.LiveKitAPI(
+        url=cfg.livekit_url.replace("ws://", "http://").replace("wss://", "https://"),
+        api_key=cfg.livekit_api_key,
+        api_secret=cfg.livekit_api_secret,
+    )
+    try:
+        rooms_resp = await lk_api.room.list_rooms(api.ListRoomsRequest())
+        now_ns = time.time_ns()
+        for room in rooms_resp.rooms:
+            age_s = (now_ns - room.creation_time) / 1e9
+            if room.num_participants == 0 and age_s > _STALE_ROOM_AGE_SECONDS:
+                logger.info(
+                    "Purging stale room %s (age=%.0fs, participants=%d)",
+                    room.name,
+                    age_s,
+                    room.num_participants,
+                )
+                await lk_api.room.delete_room(api.DeleteRoomRequest(room=room.name))
+        logger.info("Startup cleanup: checked %d rooms", len(rooms_resp.rooms))
+    except Exception:
+        logger.warning("Stale room cleanup failed — continuing anyway", exc_info=True)
+    finally:
+        await lk_api.aclose()
+
+
 async def _entrypoint(ctx: agents.JobContext) -> None:
     """LiveKit agent entrypoint — joins room, wires audio pipeline, runs."""
     global _session_state, _state_lock  # noqa: PLW0603
@@ -203,6 +239,18 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
         "messages": [],
     }
     _state_lock = asyncio.Lock()
+
+    # Register shutdown callback so resources are cleaned up when the job ends.
+    async def _on_shutdown() -> None:
+        logger.info("Job shutting down for room %s — cleaning up", ctx.room.name)
+        await close_mcp_client()
+        # Cancel background tasks (they hold references to session/stt)
+        for task in list(_background_tasks):
+            task.cancel()
+        _session_state.clear()
+        logger.info("Shutdown complete for room %s", ctx.room.name)
+
+    ctx.add_shutdown_callback(_on_shutdown)
 
     # Set to track background tasks and prevent GC
     _background_tasks: set[asyncio.Task[Any]] = set()
@@ -292,6 +340,7 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
                 "Greet the team briefly. Say you are War Room Copilot and ready to listen."
             )
         )
+
     async def capture_voiceprints() -> None:
         await asyncio.sleep(15)
         while True:
@@ -471,7 +520,12 @@ class LiveKitPlatform:
 
     def run(self) -> None:
         """Start the LiveKit agent worker (blocking, manages own event loop)."""
-        agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=_entrypoint))
+        agents.cli.run_app(
+            agents.WorkerOptions(
+                entrypoint_fnc=_entrypoint,
+                prewarm_fnc=_purge_stale_rooms,
+            )
+        )
 
     async def shutdown(self) -> None:
         await close_mcp_client()
