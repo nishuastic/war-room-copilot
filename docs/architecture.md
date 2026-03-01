@@ -29,7 +29,7 @@ flowchart LR
 
     subgraph Tools Layer
         MCP[GitHubMCPClient]
-        Docker[GitHub MCP Server\nDocker stdio]
+        MCPServer[GitHub MCP Server\nHTTP sidecar]
         GH[GitHub REST API]
     end
 
@@ -43,8 +43,8 @@ flowchart LR
     Router -. recall .-> Recall
     Router -. respond .-> Respond
     Investigate --> MCP
-    MCP -- stdio --> Docker
-    Docker -- REST --> GH
+    MCP -- HTTP --> MCPServer
+    MCPServer -- REST --> GH
     Investigate -- findings --> State
     Summarize -- findings --> State
     Recall -- findings --> State
@@ -95,9 +95,9 @@ The graph's `IncidentState` is a `TypedDict` that flows through every node and p
 | Field | Type | Purpose |
 |-------|------|---------|
 | `messages` | `Annotated[list, add_messages]` | Conversation history (appended via reducer) |
-| `transcript` | `list[str]` | Raw STT output with speaker labels |
-| `findings` | `list[str]` | Research results from all nodes |
-| `decisions` | `list[str]` | Tracked decisions made during incident |
+| `transcript` | `Annotated[list[str], operator.add]` | Raw STT output with speaker labels |
+| `findings` | `Annotated[list[str], operator.add]` | Research results from all nodes |
+| `decisions` | `Annotated[list[str], operator.add]` | Tracked decisions made during incident |
 | `speakers` | `dict[str, str]` | Speaker ID → display name |
 | `routed_skill` | `str` | Which skill the router selected |
 | `query` | `str` | The user's current query |
@@ -179,7 +179,7 @@ The **dashboard API** (FastAPI SSE) streams live transcript, findings, and decis
 | **Contradict** | `src/war_room_copilot/graph/nodes/contradict.py` | **Contradiction detection in transcript** |
 | **Capture Decision** | `src/war_room_copilot/graph/nodes/capture_decision.py` | **Decision detection in transcript** |
 | **Post-mortem** | `src/war_room_copilot/graph/nodes/postmortem.py` | **Structured incident report generation** |
-| GitHub MCP Client | `src/war_room_copilot/tools/github_mcp.py` | Async MCP client — Docker lifecycle, tool invocation, schema conversion |
+| GitHub MCP Client | `src/war_room_copilot/tools/github_mcp.py` | Async MCP client — streamable HTTP transport, tool invocation, schema conversion |
 | GitHub Facade | `src/war_room_copilot/tools/github.py` | `get_repo_context()` — parallel fetch of issues, PRs, commits |
 | Backboard Client | `src/war_room_copilot/tools/backboard.py` | Cross-session memory via Backboard.io |
 | Dashboard API | `src/war_room_copilot/api/main.py` | FastAPI SSE endpoint for real-time dashboard |
@@ -190,33 +190,34 @@ The **dashboard API** (FastAPI SSE) streams live transcript, findings, and decis
 sequenceDiagram
     participant Agent
     participant GitHubMCPClient
-    participant Docker as Docker Container<br/>(github-mcp-server)
+    participant MCPServer as GitHub MCP Server<br/>(HTTP sidecar)
     participant GitHub as GitHub API
 
     Agent->>GitHubMCPClient: async with GitHubMCPClient()
-    GitHubMCPClient->>Docker: docker run --rm -i (stdio)
-    Docker-->>GitHubMCPClient: MCP session initialized (51 tools)
+    GitHubMCPClient->>MCPServer: HTTP connect (streamable HTTP)
+    MCPServer-->>GitHubMCPClient: MCP session initialized (51 tools)
 
     Agent->>GitHubMCPClient: get_repo_context(owner, repo)
     par Parallel fetch
-        GitHubMCPClient->>Docker: list_issues
-        GitHubMCPClient->>Docker: list_pull_requests
-        GitHubMCPClient->>Docker: list_commits
+        GitHubMCPClient->>MCPServer: list_issues
+        GitHubMCPClient->>MCPServer: list_pull_requests
+        GitHubMCPClient->>MCPServer: list_commits
     end
-    Docker->>GitHub: REST API calls
-    GitHub-->>Docker: JSON responses
-    Docker-->>GitHubMCPClient: MCP content blocks
+    MCPServer->>GitHub: REST API calls
+    GitHub-->>MCPServer: JSON responses
+    MCPServer-->>GitHubMCPClient: MCP content blocks
     GitHubMCPClient-->>Agent: RepoContext (parsed Pydantic models)
 
     Agent->>GitHubMCPClient: close()
-    GitHubMCPClient->>Docker: terminate container
+    GitHubMCPClient->>MCPServer: close HTTP session
 ```
 
 **Key design decisions:**
 
+- MCP server runs as a Docker Compose sidecar — agent connects via HTTP, no Docker socket needed
 - MCP tools are dynamically converted to function-calling format via `mcp_tool_to_schema()`
 - `asyncio.gather(return_exceptions=True)` — partial failures return empty lists, not crashes
-- GitHub token passed via Docker `-e` env var (never logged or exposed in CLI args)
+- GitHub token passed via `Authorization: Bearer` header over Docker-internal network
 - Error hierarchy: `WarRoomToolError` → `MCPConnectionError` / `MCPServerError` / `GitHubRateLimitError`
 - `RepoContext.as_prompt_context()` renders token-efficient text for LLM injection
 
@@ -257,7 +258,7 @@ Five async tasks run in parallel with the voice loop:
 | **Reasoning orchestration** | **LangGraph** | **Declarative graph for skill routing, memory, multi-agent research** |
 | **Graph LLM** | **LangChain (ChatOpenAI/ChatAnthropic)** | **Required by LangGraph nodes; reads same config as voice LLM** |
 | GitHub integration | GitHub MCP Server | Official, 51 tools out of the box, zero custom API wrappers |
-| MCP transport | Docker stdio | Isolated, reproducible, no local Node.js required |
+| MCP transport | Streamable HTTP (sidecar) | No Docker socket mount, agent connects over internal network |
 | Config management | pydantic-settings | Auto `.env` loading, type coercion, validation |
 | Schema conversion | MCP → function-calling schema | Dynamic — new MCP tools automatically available to the LLM |
 
@@ -270,21 +271,22 @@ cp .env.example .env       # fill in API keys
 docker compose up --build
 ```
 
-This starts two containers:
+This starts three containers:
 
 | Service | Image | Purpose |
-|---------|-------|---------|
+| ------- | ----- | ------- |
 | `livekit-server` | `livekit/livekit-server` | WebRTC media server (dev mode) |
-| `agent` | Built from `Dockerfile` | War Room Copilot agent |
+| `github-mcp-server` | `ghcr.io/github/github-mcp-server` | GitHub API tools via MCP (HTTP transport) |
+| `agent` | Built from `Dockerfile` | War Room Copilot agent + dashboard API |
 
-The agent container mounts the host Docker socket (`/var/run/docker.sock`) so the GitHub MCP client can launch its server container as a sibling — no Docker-in-Docker required.
+All services communicate over Docker's internal network. The agent connects to the MCP sidecar via HTTP — no Docker socket mount, no Docker CLI inside the container. Runtime data (voiceprints, postmortems) is persisted in a named Docker volume (`speaker-data`) mounted at `/app/data/`.
 
 ## Next Steps
 
 1. **Wire LangGraph tools into LiveKit function calling** — expose `_invoke_graph()` as a registered tool in `AgentSession`
 2. **Add LangGraph checkpointing** — `MemorySaver` for dev, Postgres/Redis for production persistence
 3. **Add contradiction detection node** — parallel monitoring of transcript for factual contradictions
-4. **Add Datadog MCP integration** — same pattern as GitHub (Docker stdio transport)
+4. **Add Datadog MCP integration** — same pattern as GitHub (HTTP sidecar in Docker Compose)
 5. **LangSmith tracing** — set `LANGCHAIN_TRACING_V2=true` for automatic graph execution traces
 
 See [PLAN_V0.md](PLAN_V0.md) for the full roadmap.

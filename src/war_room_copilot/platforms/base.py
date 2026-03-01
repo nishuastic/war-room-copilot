@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +13,9 @@ from typing import Any, Protocol, runtime_checkable
 logger = logging.getLogger("war-room-copilot.platforms")
 
 _PROJECT_ROOT = Path(__file__).parents[3]
-SPEAKERS_FILE = _PROJECT_ROOT / "speakers.json"
+# Data directory: /app/data/ in Docker, or ./data/ locally
+_DATA_DIR = Path(os.environ.get("APP_DATA_DIR", _PROJECT_ROOT / "data"))
+SPEAKERS_FILE = _DATA_DIR / "speakers.json"
 RESERVED_LABEL = re.compile(r"^S\d+$")
 
 

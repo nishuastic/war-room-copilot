@@ -12,6 +12,20 @@ services:
       timeout: 3s
       retries: 5
 
+  github-mcp-server:
+    image: ghcr.io/github/github-mcp-server
+    command: ["http", "--port", "8090"]
+    environment:
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN}
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8090/mcp"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   agent:
     build: .
     env_file: .env
@@ -20,11 +34,12 @@ services:
       - LIVEKIT_URL=ws://livekit-server:7880
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=secret
+      # GitHub MCP sidecar URL (Docker-internal)
+      - GITHUB_MCP_URL=http://github-mcp-server:8090/mcp
     ports:
       - "8000:8000"  # Dashboard API
     volumes:
-      - ./speakers.json:/app/speakers.json        # voiceprint persistence
-      - /var/run/docker.sock:/var/run/docker.sock  # GitHub MCP needs Docker
+      - speaker-data:/app/data   # voiceprint + postmortem persistence
     logging:
       driver: json-file
       options:
@@ -33,4 +48,9 @@ services:
     depends_on:
       livekit-server:
         condition: service_healthy
+      github-mcp-server:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  speaker-data:

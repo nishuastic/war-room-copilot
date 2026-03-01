@@ -19,10 +19,9 @@ FROM python:3.12-slim-bookworm
 WORKDIR /app
 
 # System deps:
-#   libglib2.0-0  — required by LiveKit's native FFI library (liblivekit_ffi.so)
-#   docker.io     — Docker CLI so the GitHub MCP client can launch its server container
+#   libglib2.0-0 — required by LiveKit's native FFI library (liblivekit_ffi.so)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libglib2.0-0 docker.io \
+    && apt-get install -y --no-install-recommends libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/.venv .venv
@@ -32,7 +31,11 @@ COPY --from=builder /app/pyproject.toml .
 
 ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
-    HOME=/app
+    HOME=/app \
+    APP_DATA_DIR=/app/data
+
+# Persistent data directory (mounted as a Docker volume)
+RUN mkdir -p /app/data
 
 # Run as non-root for security
 RUN groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --no-create-home appuser \

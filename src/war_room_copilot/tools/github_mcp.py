@@ -1,4 +1,4 @@
-"""Async MCP client for the GitHub MCP server running in Docker over stdio."""
+"""Async MCP client for the GitHub MCP server over streamable HTTP."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import logging
 from contextlib import AsyncExitStack
 from typing import Any
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import Tool
 
 from war_room_copilot.config import get_settings
@@ -25,7 +25,7 @@ class WarRoomToolError(Exception):
 
 
 class MCPConnectionError(WarRoomToolError):
-    """Docker not available, or server failed to start within timeout."""
+    """MCP server unreachable or failed to respond within timeout."""
 
 
 class MCPServerError(WarRoomToolError):
@@ -61,7 +61,13 @@ def mcp_tool_to_schema(tool: Tool) -> ToolSchema:
 
 
 class GitHubMCPClient:
-    """Async client for the GitHub MCP server running in Docker over stdio.
+    """Async client for the GitHub MCP server over streamable HTTP.
+
+    In Docker Compose, the MCP server runs as a sidecar service and the agent
+    connects via HTTP (no Docker socket or CLI needed).
+
+    For local development without Docker Compose, set GITHUB_MCP_URL to a
+    locally-running instance (e.g. ``http://localhost:8090/mcp``).
 
     Usage (context manager — preferred for scripts/tests):
 
@@ -80,7 +86,7 @@ class GitHubMCPClient:
     def __init__(self, github_token: str | None = None) -> None:
         cfg = get_settings()
         self._token: str = github_token or cfg.github_token
-        self._image: str = cfg.github_mcp_image
+        self._url: str = cfg.github_mcp_url
         self._tool_timeout: float = cfg.github_mcp_timeout
         self._connect_timeout: float = cfg.github_mcp_connect_timeout
 
@@ -91,9 +97,9 @@ class GitHubMCPClient:
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     async def connect(self) -> None:
-        """Start Docker container and establish MCP session.
+        """Connect to the GitHub MCP server over streamable HTTP.
 
-        Raises MCPConnectionError if Docker is unavailable or startup times out.
+        Raises MCPConnectionError if the server is unreachable or times out.
         """
         if self._session is not None:
             raise MCPConnectionError("Already connected. Call close() before reconnecting.")
@@ -103,25 +109,23 @@ class GitHubMCPClient:
                 "No GitHub token configured. Set GITHUB_TOKEN in your environment or .env file."
             )
 
-        server_params = StdioServerParameters(
-            command="docker",
-            args=[
-                "run",
-                "--rm",
-                "-i",
-                "-e",
-                "GITHUB_PERSONAL_ACCESS_TOKEN",
-                self._image,
-            ],
-            env={"GITHUB_PERSONAL_ACCESS_TOKEN": self._token},
-        )
+        if not self._url:
+            raise MCPConnectionError(
+                "No GitHub MCP URL configured. Set GITHUB_MCP_URL or run via docker compose."
+            )
 
         try:
             transport = await asyncio.wait_for(
-                self._exit_stack.enter_async_context(stdio_client(server_params)),
+                self._exit_stack.enter_async_context(
+                    streamablehttp_client(
+                        url=self._url,
+                        headers={"Authorization": f"Bearer {self._token}"},
+                        timeout=self._connect_timeout,
+                    )
+                ),
                 timeout=self._connect_timeout,
             )
-            read_stream, write_stream = transport
+            read_stream, write_stream, _get_session_id = transport
             self._session = await self._exit_stack.enter_async_context(
                 ClientSession(read_stream, write_stream)
             )
@@ -130,7 +134,8 @@ class GitHubMCPClient:
             response = await self._session.list_tools()
             self._tools = list(response.tools)
             logger.info(
-                "GitHub MCP server ready. %d tools available.",
+                "GitHub MCP server ready at %s. %d tools available.",
+                self._url,
                 len(self._tools),
             )
         except MCPConnectionError:
@@ -141,16 +146,17 @@ class GitHubMCPClient:
             await self._exit_stack.aclose()
             self._session = None
             raise MCPConnectionError(
-                f"GitHub MCP server ({self._image}) did not start "
-                f"within {self._connect_timeout}s. Is Docker running?"
+                f"GitHub MCP server at {self._url} did not respond within {self._connect_timeout}s."
             ) from exc
         except Exception as exc:
             await self._exit_stack.aclose()
             self._session = None
-            raise MCPConnectionError(f"Failed to start GitHub MCP server: {exc}") from exc
+            raise MCPConnectionError(
+                f"Failed to connect to GitHub MCP server at {self._url}: {exc}"
+            ) from exc
 
     async def close(self) -> None:
-        """Tear down the MCP session and Docker subprocess."""
+        """Tear down the MCP session."""
         await self._exit_stack.aclose()
         self._session = None
         self._tools = []

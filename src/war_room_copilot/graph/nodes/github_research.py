@@ -27,8 +27,8 @@ async def get_mcp_client() -> GitHubMCPClient:
     global _mcp_client  # noqa: PLW0603
     if _mcp_client is not None:
         try:
-            # Lightweight health check — list tools to verify connection
-            await _mcp_client.session.list_tools()
+            # Lightweight health check — list tool names to verify connection
+            _mcp_client.tool_names()
             return _mcp_client
         except Exception:
             logger.warning("MCP client connection lost, reconnecting...")

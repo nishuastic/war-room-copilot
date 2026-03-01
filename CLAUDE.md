@@ -4,13 +4,20 @@ Voice-first AI agent for production incident war rooms. Joins a LiveKit meeting,
 
 ## Quick Start
 
+Everything runs inside Docker — no local Python, Homebrew, or LiveKit install required:
+
 ```bash
-uv sync                                              # install deps
-cp .env.example .env                                 # fill in API keys
-uv run python -m src.war_room_copilot.core.agent dev # start LiveKit agent
+cp .env.example .env          # fill in API keys
+docker compose up --build      # start everything (LiveKit + GitHub MCP + Agent)
 ```
 
-For non-OpenAI providers: `uv sync --extra anthropic` or `uv sync --extra all-llm`
+For local development (linting, tests, type-checking only):
+
+```bash
+uv sync --extra dev            # install dev dependencies
+uv run ruff check src/ --fix   # lint
+uv run pytest tests/ -v        # tests
+```
 
 ## Task Tracking (Beads)
 
@@ -34,7 +41,11 @@ This project uses [beads](https://github.com/steveyegge/beads) for git-backed ta
 
 | Task | Command |
 | ---- | ------- |
-| Run agent (dev) | `uv run python -m src.war_room_copilot.core.agent dev` |
+| **Run app** | `docker compose up --build` |
+| **Run app (detached)** | `docker compose up --build -d` |
+| **View logs** | `docker compose logs -f agent` |
+| **Stop** | `docker compose down` |
+| **Stop + wipe volumes** | `docker compose down -v` |
 | Lint + fix | `uv run ruff check src/ --fix` |
 | Format | `uv run ruff format src/` |
 | Type check | `uv run mypy src/` |
@@ -43,12 +54,12 @@ This project uses [beads](https://github.com/steveyegge/beads) for git-backed ta
 
 ## Environment Variables
 
-**LiveKit:** `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
+**LiveKit:** `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` (auto-overridden in Docker Compose)
 **Speech:** `SPEECHMATICS_API_KEY`, `ELEVEN_API_KEY`
 **LLM (pick one):** `OPENAI_API_KEY` (default), `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`
 **LLM config:** `LLM_PROVIDER` ("openai"|"anthropic"|"google"), `LLM_MODEL` (empty = provider default)
 **GitHub MCP:** `GITHUB_TOKEN`, `DEFAULT_REPO_OWNER`, `DEFAULT_REPO_NAME`
-**GitHub MCP tuning:** `GITHUB_MCP_IMAGE`, `GITHUB_MCP_TIMEOUT` (30s), `GITHUB_MCP_CONNECT_TIMEOUT` (10s)
+**GitHub MCP tuning:** `GITHUB_MCP_URL` (auto-set in Docker Compose), `GITHUB_MCP_TIMEOUT` (30s), `GITHUB_MCP_CONNECT_TIMEOUT` (10s)
 
 All env vars load from `.env` via pydantic-settings. See @src/war_room_copilot/config.py for full list with defaults.
 
@@ -69,7 +80,7 @@ See @docs/architecture.md for diagrams and detailed design. See @docs/PLAN_V0.md
 - `core/agent.py` — CLI entrypoint; `parse_known_args` passes extras to LiveKit CLI
 - `platforms/base.py` — `MeetingPlatform` Protocol + speaker persistence helpers
 - `platforms/livekit.py` — Full implementation: VAD → STT → LLM → TTS + LangGraph bridge (`_invoke_graph`)
-- `tools/github_mcp.py` — `GitHubMCPClient` async context manager (Docker stdio transport)
+- `tools/github_mcp.py` — `GitHubMCPClient` async context manager (streamable HTTP transport)
 - `tools/github.py` — `get_repo_context()` facade: parallel fetch via `gather(return_exceptions=True)`
 
 **LangGraph modules (`graph/`):**
@@ -84,6 +95,16 @@ See @docs/architecture.md for diagrams and detailed design. See @docs/PLAN_V0.md
 - `graph/nodes/respond.py` — General conversation with incident context
 
 **Platform abstraction:** `MeetingPlatform` Protocol in base.py. `get_platform()` factory in `platforms/__init__.py`. Meet/Zoom are stubs.
+
+## Docker Compose Services
+
+| Service | Image | Purpose |
+| ------- | ----- | ------- |
+| `livekit-server` | `livekit/livekit-server` | WebRTC media server (dev mode) |
+| `github-mcp-server` | `ghcr.io/github/github-mcp-server` | GitHub API tools via MCP (HTTP transport) |
+| `agent` | Built from `Dockerfile` | War Room Copilot agent |
+
+The agent connects to the MCP sidecar over Docker's internal network — no Docker socket mount, no Docker CLI inside the container.
 
 ## Code Conventions
 
@@ -100,20 +121,21 @@ See @docs/architecture.md for diagrams and detailed design. See @docs/PLAN_V0.md
 
 ## Common Gotchas
 
-1. **Docker must be running** for GitHub MCP tools — the client spawns `docker run --rm -i` on connect
+1. **Run everything via `docker compose up`** — the agent, LiveKit server, and GitHub MCP server all run as Docker Compose services. Do not run the agent outside Docker for production use.
 2. **LiveKit owns the event loop** — `run()` calls `agents.cli.run_app()` which is blocking; do not wrap in `asyncio.run()`
 3. **sys.argv rewriting** — `core/agent.py` rewrites sys.argv before calling LiveKit; be careful adding CLI flags
 4. **Settings are cached** — `get_settings()` uses `@lru_cache`; call `get_settings.cache_clear()` in tests
 5. **`type: ignore` in llm.py** — Anthropic/Google plugins lack stubs; the ignores are intentional
-6. **speakers.json is runtime data** — voiceprints saved every 30s by background task; do not commit real data
+6. **speakers.json is runtime data** — stored in `/app/data/` (Docker volume `speaker-data`); do not commit
 7. **MCP returns ContentBlocks** — parsers in `tools/github.py` join `.text` fields then `json.loads()`
 8. **Optional deps** — Anthropic/Google require `uv sync --extra anthropic` / `--extra google` / `--extra all-llm`
 9. **Dolt server required for beads** — run `dolt sql-server --port 3307 &` before using `bd` commands
 10. **Two LLM factories** — `llm.create_llm()` returns LiveKit plugins (voice loop); `graph.llm.get_graph_llm()` returns LangChain models (reasoning loop). Both read from the same `LLM_PROVIDER`/`LLM_MODEL` config
 11. **Graph LLM is cached** — `get_graph_llm()` uses `@lru_cache`; call `get_graph_llm.cache_clear()` in tests
-12. **`_session_state` is module-level** — in `livekit.py`, accumulates across graph invocations within a session; reset on agent restart
+12. **`_session_state` is session-scoped** — in `livekit.py`, reset fresh per session in `_entrypoint()`, protected by `asyncio.Lock`
 13. **Docker logging requires `PYTHONUNBUFFERED=1`** — without it, Python block-buffers stdout in non-TTY containers and logs vanish. Always set in Dockerfile.
 14. **Use `start` not `dev` in Docker** — `dev` mode uses watchfiles which spawns child processes via `multiprocessing.spawn`; their stdout goes to internal pipes that Docker can't capture. `start` runs directly and logs are visible. Reserve `dev` for local terminal use only.
+15. **GitHub MCP is a sidecar** — the MCP server runs in its own container and the agent connects via HTTP (`GITHUB_MCP_URL`). No Docker socket mount needed.
 
 ## File Maintenance Rules
 

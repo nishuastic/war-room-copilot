@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     backboard_api_key: str = Field(default="")
     langsmith_api_key: str = Field(default="")
 
-    # GitHub MCP
-    github_mcp_image: str = Field(default="ghcr.io/github/github-mcp-server")
+    # GitHub MCP (sidecar in Docker Compose, or local instance)
+    github_mcp_url: str = Field(default="http://localhost:8090/mcp")
     github_mcp_timeout: float = Field(default=30.0)
     github_mcp_connect_timeout: float = Field(default=10.0)
 

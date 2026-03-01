@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,8 +18,9 @@ logger = logging.getLogger("war-room-copilot.graph.nodes.postmortem")
 # Maximum transcript lines sent to the LLM to avoid context overflow
 _MAX_TRANSCRIPT_LINES = 100
 
-# Output directory for postmortem files (configurable, defaults to ./postmortems/)
-POSTMORTEM_DIR = Path("postmortems")
+# Output directory for postmortem files — inside the persistent data volume
+_DATA_DIR = Path(os.environ.get("APP_DATA_DIR", Path(__file__).parents[4] / "data"))
+POSTMORTEM_DIR = _DATA_DIR / "postmortems"
 
 POSTMORTEM_SYSTEM_PROMPT = SystemMessage(
     content="""\
