@@ -21,6 +21,7 @@ dependencies = [
     "langchain-openai>=0.3",
     "fastapi",
     "uvicorn[standard]",
+    "backboard-sdk>=1.5.2",
 ]
 
 [project.optional-dependencies]

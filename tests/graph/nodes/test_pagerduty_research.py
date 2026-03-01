@@ -10,7 +10,6 @@ from tests.conftest import make_incident_state
 from war_room_copilot.graph.nodes.pagerduty_research import pagerduty_research_node
 from war_room_copilot.tools.github_mcp import WarRoomToolError
 
-
 # ── pagerduty_research_node ──────────────────────────────────────────────────
 
 

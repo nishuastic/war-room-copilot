@@ -11,7 +11,6 @@ from war_room_copilot.tools.sentry_mcp import (
     format_sentry_issues_for_llm,
 )
 
-
 # ── format_sentry_issues_for_llm ─────────────────────────────────────────────
 
 

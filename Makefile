@@ -5,7 +5,7 @@ export NODE_IP
 
 ROOM ?= war-room
 
-.PHONY: up down restart logs token kill-orphans playground
+.PHONY: up down restart logs token kill-orphans playground dashboard
 
 # Kill orphaned Python workers from previous `dev` mode runs before starting
 # Docker. These zombies connect to :7880 and steal jobs from the real agent.
@@ -39,3 +39,7 @@ token:
 
 playground:
 	@./scripts/open-playground.sh $(ROOM)
+
+dashboard:
+	@echo "Opening dashboard at http://localhost:3000"
+	@open http://localhost:3000 2>/dev/null || echo "Open http://localhost:3000 in your browser"

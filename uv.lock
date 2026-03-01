@@ -3211,6 +3211,7 @@ name = "war-room-copilot"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "backboard-sdk" },
     { name = "fastapi" },
     { name = "langchain-openai" },
     { name = "langgraph" },
@@ -3253,6 +3254,7 @@ google = [
 
 [package.metadata]
 requires-dist = [
+    { name = "backboard-sdk", specifier = ">=1.5.2" },
     { name = "backboard-sdk", marker = "extra == 'backboard'" },
     { name = "fastapi" },
     { name = "langchain-anthropic", marker = "extra == 'all-llm'", specifier = ">=0.3" },

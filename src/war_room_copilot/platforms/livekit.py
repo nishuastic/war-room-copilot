@@ -107,6 +107,23 @@ def _trim_list(lst: list[Any], max_len: int) -> list[Any]:
     return lst
 
 
+def _format_relative(epoch: float, start: float) -> str:
+    """Format epoch as +MM:SS relative to session start."""
+    delta = max(0, int(epoch - start))
+    return f"+{delta // 60:02d}:{delta % 60:02d}"
+
+
+def _infer_finding_source(text: str) -> str:
+    """Infer the source of a finding from its text content."""
+    text_lower = text.lower()
+    github_kw = ("issue", "pr ", "pull request", "commit", "github", "merge")
+    if any(kw in text_lower for kw in github_kw):
+        return "github"
+    if any(kw in text_lower for kw in ("metric", "latency", "error rate", "p99", "throughput")):
+        return "metrics"
+    return "code"
+
+
 def _to_livekit_speakers(speakers: list[SpeakerInfo]) -> list[SpeakerIdentifier]:
     """Convert platform-agnostic SpeakerInfo to LiveKit's SpeakerIdentifier."""
     return [
@@ -144,23 +161,32 @@ async def _invoke_graph(query: str) -> str:
             "query": query,
         }
 
+    # Set orb to thinking while graph runs
+    async with _state_lock:
+        _session_state["orb_state"] = "thinking"
+
     # Stream through the graph node-by-node for observability
     result: dict[str, Any] = {}
+    node_start = time.time()
     async for chunk in incident_graph.astream(input_state):
         # Each chunk is a dict keyed by node name with that node's output
         for node_name, node_output in chunk.items():
             if node_name == "__end__":
                 continue
+            node_end = time.time()
             logger.info("[Graph] %s completed", node_name)
             # Emit trace event to dashboard via session state
             trace_entry = {
                 "node": node_name,
                 "query": query,
                 "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                "duration": round(node_end - node_start, 1),
+                "epoch": node_end,
             }
             async with _state_lock:
                 traces = _session_state.setdefault("graph_traces", [])
                 traces.append(trace_entry)
+            node_start = time.time()
             # Merge node output into result (last write wins per key)
             if isinstance(node_output, dict):
                 for k, v in node_output.items():
@@ -171,6 +197,46 @@ async def _invoke_graph(query: str) -> str:
 
     # Persist accumulated state for next invocation (with trimming)
     async with _state_lock:
+        # Structured findings for frontend
+        new_findings = result.get("findings", [])
+        old_findings = _session_state.get("findings", [])
+        for f_text in new_findings:
+            if f_text not in old_findings:
+                _session_state["findings_structured"].append(
+                    {
+                        "text": f_text,
+                        "source": _infer_finding_source(f_text),
+                        "epoch": time.time(),
+                    }
+                )
+                _session_state["timeline"].append(
+                    {
+                        "type": "finding",
+                        "description": f_text[:100],
+                        "epoch": time.time(),
+                    }
+                )
+
+        # Structured decisions for frontend
+        new_decisions = result.get("decisions", [])
+        old_decisions = _session_state.get("decisions", [])
+        for d_text in new_decisions:
+            if d_text not in old_decisions:
+                _session_state["decisions_structured"].append(
+                    {
+                        "text": d_text,
+                        "speaker": "",
+                        "epoch": time.time(),
+                    }
+                )
+                _session_state["timeline"].append(
+                    {
+                        "type": "decision",
+                        "description": d_text[:100],
+                        "epoch": time.time(),
+                    }
+                )
+
         _session_state["findings"] = _trim_list(
             result.get("findings", _session_state.get("findings", [])),
             _MAX_FINDINGS,
@@ -180,6 +246,7 @@ async def _invoke_graph(query: str) -> str:
             _MAX_DECISIONS,
         )
         _session_state["messages"] = result.get("messages", _session_state.get("messages", []))
+        _session_state["orb_state"] = "idle"
 
     # Extract the last AI message as the response text
     messages = result.get("messages", [])
@@ -359,9 +426,16 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
         "transcript": [],
         "transcript_structured": [],
         "findings": [],
+        "findings_structured": [],
         "decisions": [],
+        "decisions_structured": [],
         "speakers": {},
+        "speakers_list": [],
         "messages": [],
+        "graph_traces": [],
+        "timeline": [],
+        "orb_state": "idle",
+        "session_start_epoch": time.time(),
         "direct_address": False,
         "direct_address_until": 0.0,
     }
@@ -401,6 +475,15 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
     # Seed session state with known speakers
     for s in known_speakers:
         _session_state["speakers"][s.label] = s.label
+        speaker_id = len(_session_state["speakers_list"]) + 1
+        _session_state["speakers_list"].append(
+            {
+                "id": speaker_id,
+                "name": s.label,
+                "role": "",
+                "colorVar": f"--speaker-{speaker_id}",
+            }
+        )
 
     cfg = get_settings()
     stt_kwargs: dict[str, Any] = {
@@ -450,6 +533,18 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
         ts = datetime.now(tz=timezone.utc).strftime("%H:%M:%S")
         line = f"[{ts}] {display_name}: {text}"
         _session_state["transcript"].append(line)
+        # Register new speakers dynamically for the frontend
+        known_names = {s["name"] for s in _session_state.get("speakers_list", [])}
+        if display_name not in known_names and display_name != "Unknown":
+            speaker_id = len(_session_state["speakers_list"]) + 1
+            _session_state["speakers_list"].append(
+                {
+                    "id": speaker_id,
+                    "name": display_name,
+                    "role": "",
+                    "colorVar": f"--speaker-{speaker_id}",
+                }
+            )
         # Trim transcript to prevent unbounded growth
         if len(_session_state["transcript"]) > _MAX_TRANSCRIPT:
             _session_state["transcript"] = _session_state["transcript"][-_MAX_TRANSCRIPT:]
@@ -574,6 +669,20 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
                             _session_state["decisions"].append(entry)
                             _session_state["decisions"] = _trim_list(
                                 _session_state["decisions"], _MAX_DECISIONS
+                            )
+                            _session_state["decisions_structured"].append(
+                                {
+                                    "text": decision,
+                                    "speaker": speaker,
+                                    "epoch": time.time(),
+                                }
+                            )
+                            _session_state["timeline"].append(
+                                {
+                                    "type": "decision",
+                                    "description": decision[:100],
+                                    "epoch": time.time(),
+                                }
                             )
                         await session.generate_reply(
                             instructions=(

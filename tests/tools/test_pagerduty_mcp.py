@@ -12,7 +12,6 @@ from war_room_copilot.tools.pagerduty_mcp import (
     format_services_for_llm,
 )
 
-
 # ── format_incidents_for_llm ─────────────────────────────────────────────────
 
 

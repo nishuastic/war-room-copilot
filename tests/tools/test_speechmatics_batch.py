@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import struct
 import wave
 from io import BytesIO
 
@@ -12,7 +11,6 @@ from war_room_copilot.tools.speechmatics_batch import (
     format_enrichment_for_postmortem,
     parse_enrichment,
 )
-
 
 # ── parse_enrichment ─────────────────────────────────────────────────────────
 

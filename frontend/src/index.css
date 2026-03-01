@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 230 33% 5%;
+    --foreground: 240 5% 90%;
+    --card: 228 27% 10%;
+    --card-foreground: 240 5% 90%;
+    --popover: 228 27% 10%;
+    --popover-foreground: 240 5% 90%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 232 24% 14%;
+    --secondary-foreground: 240 5% 90%;
+    --muted: 232 24% 14%;
+    --muted-foreground: 245 10% 50%;
+    --accent: 187 92% 43%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 232 22% 16%;
+    --border-bright: 232 22% 22%;
+    --input: 232 22% 16%;
+    --ring: 217 91% 60%;
+    --radius: 0.75rem;
+
+    /* War Room custom tokens */
+    --wr-deepest: 240 33% 5%;
+    --wr-surface: 228 27% 10%;
+    --wr-elevated: 230 24% 14%;
+    --wr-amber: 38 92% 50%;
+    --wr-green: 160 84% 39%;
+    --wr-purple: 258 90% 66%;
+    --wr-pink: 330 81% 60%;
+    --wr-cyan: 187 92% 43%;
+    --wr-red: 0 84% 60%;
+    --wr-blue: 217 91% 60%;
+
+    /* Speaker colors */
+    --speaker-1: 199 89% 60%;
+    --speaker-2: 350 96% 75%;
+    --speaker-3: 45 96% 56%;
+    --speaker-4: 160 64% 55%;
+    --speaker-5: 263 85% 76%;
+    --speaker-6: 27 96% 61%;
+    --speaker-7: 174 83% 52%;
+    --speaker-8: 330 90% 71%;
+
+    /* Skill colors */
+    --skill-investigate: 217 91% 60%;
+    --skill-summarize: 258 90% 66%;
+    --skill-recall: 160 84% 39%;
+    --skill-respond: 220 9% 46%;
+    --skill-contradict: 38 92% 50%;
+    --skill-postmortem: 187 92% 43%;
+
+    --sidebar-background: 228 27% 10%;
+    --sidebar-foreground: 240 5% 90%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 232 24% 14%;
+    --sidebar-accent-foreground: 240 5% 90%;
+    --sidebar-border: 232 22% 16%;
+    --sidebar-ring: 217 91% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+/* Glassmorphism card */
+.glass-card {
+  background: hsla(228, 27%, 10%, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid hsla(232, 22%, 16%, 0.8);
+  border-radius: 12px;
+}
+
+/* Monospace font utility */
+.font-mono {
+  font-family: 'JetBrains Mono', monospace !important;
+}
+
+/* Panel header style */
+.panel-header {
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Pulsing dot animation */
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.6; }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* Siri orb animations */
+@keyframes orb-layer-1 { 0% { transform: translate(0,0) scale(1) rotate(0deg); } 33% { transform: translate(20px,-15px) scale(1.1) rotate(120deg); } 66% { transform: translate(-15px,20px) scale(0.9) rotate(240deg); } 100% { transform: translate(0,0) scale(1) rotate(360deg); } }
+@keyframes orb-layer-2 { 0% { transform: translate(0,0) scale(1) rotate(0deg); } 33% { transform: translate(-25px,10px) scale(1.15) rotate(-120deg); } 66% { transform: translate(15px,-20px) scale(0.85) rotate(-240deg); } 100% { transform: translate(0,0) scale(1) rotate(-360deg); } }
+@keyframes orb-layer-3 { 0% { transform: translate(0,0) scale(1) rotate(0deg); } 50% { transform: translate(10px,25px) scale(1.2) rotate(180deg); } 100% { transform: translate(0,0) scale(1) rotate(360deg); } }
+@keyframes orb-layer-4 { 0% { transform: translate(0,0) scale(1) rotate(0deg); } 40% { transform: translate(-20px,-20px) scale(1.1) rotate(-144deg); } 80% { transform: translate(20px,10px) scale(0.9) rotate(-288deg); } 100% { transform: translate(0,0) scale(1) rotate(-360deg); } }
+@keyframes orb-layer-5 { 0% { transform: translate(0,0) scale(1) rotate(0deg); } 25% { transform: translate(15px,15px) scale(1.1) rotate(90deg); } 50% { transform: translate(-10px,20px) scale(0.95) rotate(180deg); } 75% { transform: translate(-20px,-10px) scale(1.05) rotate(270deg); } 100% { transform: translate(0,0) scale(1) rotate(360deg); } }
+
+.orb-idle .orb-layer-1 { animation: orb-layer-1 12s ease-in-out infinite; }
+.orb-idle .orb-layer-2 { animation: orb-layer-2 10s ease-in-out infinite; }
+.orb-idle .orb-layer-3 { animation: orb-layer-3 11s ease-in-out infinite; }
+.orb-idle .orb-layer-4 { animation: orb-layer-4 9s ease-in-out infinite; }
+.orb-idle .orb-layer-5 { animation: orb-layer-5 8s ease-in-out infinite; }
+
+.orb-listening .orb-layer-1 { animation: orb-layer-1 6s ease-in-out infinite; }
+.orb-listening .orb-layer-2 { animation: orb-layer-2 5s ease-in-out infinite; }
+.orb-listening .orb-layer-3 { animation: orb-layer-3 5.5s ease-in-out infinite; }
+.orb-listening .orb-layer-4 { animation: orb-layer-4 4.5s ease-in-out infinite; }
+.orb-listening .orb-layer-5 { animation: orb-layer-5 4s ease-in-out infinite; }
+
+.orb-thinking .orb-layer-1 { animation: orb-layer-1 3s ease-in-out infinite; opacity: 0.8; }
+.orb-thinking .orb-layer-2 { animation: orb-layer-2 2.5s ease-in-out infinite; opacity: 0.8; }
+.orb-thinking .orb-layer-3 { animation: orb-layer-3 2.8s ease-in-out infinite; opacity: 0.8; }
+.orb-thinking .orb-layer-4 { animation: orb-layer-4 2.2s ease-in-out infinite; opacity: 0.8; }
+.orb-thinking .orb-layer-5 { animation: orb-layer-5 2s ease-in-out infinite; opacity: 0.8; }
+
+.orb-speaking .orb-layer-1 { animation: orb-layer-1 2.5s ease-in-out infinite; opacity: 0.9; }
+.orb-speaking .orb-layer-2 { animation: orb-layer-2 2s ease-in-out infinite; opacity: 0.9; }
+.orb-speaking .orb-layer-3 { animation: orb-layer-3 1.8s ease-in-out infinite; opacity: 0.9; }
+.orb-speaking .orb-layer-4 { animation: orb-layer-4 1.5s ease-in-out infinite; opacity: 0.9; }
+.orb-speaking .orb-layer-5 { animation: orb-layer-5 2.2s ease-in-out infinite; opacity: 0.9; }
+
+/* Tabular nums */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* No scrollbar for the main layout */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

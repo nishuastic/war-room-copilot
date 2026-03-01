@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from starlette.testclient import TestClient
 
 from war_room_copilot.api.main import app, set_state_ref
@@ -10,7 +12,7 @@ from war_room_copilot.api.main import app, set_state_ref
 
 
 def test_state_snapshot_empty() -> None:
-    """Empty state returns empty lists and dict."""
+    """Empty state returns empty lists."""
     set_state_ref({})
     client = TestClient(app)
     resp = client.get("/state")
@@ -19,42 +21,82 @@ def test_state_snapshot_empty() -> None:
     assert data["transcript"] == []
     assert data["findings"] == []
     assert data["decisions"] == []
-    assert data["speakers"] == {}
+    assert data["speakers"] == []
 
 
 def test_state_snapshot_with_data() -> None:
-    """Populated state is returned correctly."""
+    """Populated state is returned as structured objects."""
+    now = time.time()
     set_state_ref(
         {
-            "transcript": ["10:00 Alice: alert fired"],
-            "findings": ["DB latency spike"],
-            "decisions": ["Roll back checkout"],
-            "speakers": {"S0": "Alice"},
+            "session_start_epoch": now - 60,
+            "transcript_structured": [
+                {"speaker": "Alice", "text": "alert fired", "timestamp": "10:00:00", "epoch": now},
+            ],
+            "findings_structured": [
+                {"text": "DB latency spike", "source": "metrics", "epoch": now},
+            ],
+            "decisions_structured": [
+                {"text": "Roll back checkout", "speaker": "Alice", "epoch": now},
+            ],
+            "speakers_list": [
+                {"id": 1, "name": "Alice", "role": "", "colorVar": "--speaker-1"},
+            ],
+            "graph_traces": [],
+            "timeline": [],
         }
     )
     client = TestClient(app)
     resp = client.get("/state")
     data = resp.json()
-    assert data["transcript"] == ["10:00 Alice: alert fired"]
-    assert data["findings"] == ["DB latency spike"]
-    assert data["decisions"] == ["Roll back checkout"]
-    assert data["speakers"] == {"S0": "Alice"}
+    assert len(data["transcript"]) == 1
+    assert data["transcript"][0]["text"] == "alert fired"
+    assert data["transcript"][0]["speakerId"] == 1
+    assert len(data["findings"]) == 1
+    assert data["findings"][0]["source"] == "metrics"
+    assert len(data["decisions"]) == 1
+    assert data["decisions"][0]["speaker"] == "Alice"
+    assert len(data["speakers"]) == 1
+    assert data["speakers"][0]["name"] == "Alice"
 
 
 def test_set_state_ref_updates_state() -> None:
     """set_state_ref changes what /state returns."""
-    set_state_ref({"transcript": ["line1"]})
+    now = time.time()
+    set_state_ref(
+        {
+            "session_start_epoch": now,
+            "transcript_structured": [
+                {"speaker": "A", "text": "line1", "timestamp": "00:00", "epoch": now},
+            ],
+        }
+    )
     client = TestClient(app)
-    assert client.get("/state").json()["transcript"] == ["line1"]
+    assert client.get("/state").json()["transcript"][0]["text"] == "line1"
 
-    set_state_ref({"transcript": ["line2"]})
-    assert client.get("/state").json()["transcript"] == ["line2"]
+    set_state_ref(
+        {
+            "session_start_epoch": now,
+            "transcript_structured": [
+                {"speaker": "A", "text": "line2", "timestamp": "00:00", "epoch": now},
+            ],
+        }
+    )
+    assert client.get("/state").json()["transcript"][0]["text"] == "line2"
 
 
 def test_state_includes_speakers() -> None:
-    """Speakers dict is included in the /state response."""
-    set_state_ref({"speakers": {"S0": "Alice", "S1": "Bob"}})
+    """Speakers list is included in the /state response."""
+    set_state_ref(
+        {
+            "speakers_list": [
+                {"id": 1, "name": "Alice", "role": "", "colorVar": "--speaker-1"},
+                {"id": 2, "name": "Bob", "role": "SRE", "colorVar": "--speaker-2"},
+            ],
+        }
+    )
     client = TestClient(app)
     data = client.get("/state").json()
-    assert data["speakers"]["S0"] == "Alice"
-    assert data["speakers"]["S1"] == "Bob"
+    assert len(data["speakers"]) == 2
+    assert data["speakers"][0]["name"] == "Alice"
+    assert data["speakers"][1]["name"] == "Bob"
