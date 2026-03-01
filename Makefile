@@ -3,7 +3,9 @@
 NODE_IP ?= $(shell ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $$1}')
 export NODE_IP
 
-.PHONY: up down restart logs token kill-orphans
+ROOM ?= war-room
+
+.PHONY: up down restart logs token kill-orphans playground
 
 # Kill orphaned Python workers from previous `dev` mode runs before starting
 # Docker. These zombies connect to :7880 and steal jobs from the real agent.
@@ -34,3 +36,6 @@ token:
 	t.with_identity('user1'); \
 	t.with_grants(VideoGrants(room_join=True, room='war-room')); \
 	print(t.to_jwt())"
+
+playground:
+	@./scripts/open-playground.sh $(ROOM)
