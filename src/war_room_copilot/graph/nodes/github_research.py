@@ -143,9 +143,7 @@ async def _get_recent_commits(client: GitHubMCPClient) -> str:
         return f"[GitHub Recent Commits] Error: {exc}"
 
 
-async def _generate_hypothesis(
-    query: str, findings: list[str], transcript: list[str]
-) -> str:
+async def _generate_hypothesis(query: str, findings: list[str], transcript: list[str]) -> str:
     """Use the graph LLM to generate a root cause hypothesis from findings + transcript."""
     from war_room_copilot.graph.llm import get_graph_llm
 

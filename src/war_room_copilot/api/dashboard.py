@@ -343,13 +343,19 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     }
   }
 
+  function stripSpeakerTags(s) {
+    // Strip Speechmatics XML diarization tags: <S1>, </S1>, <PASSIVE>, etc.
+    return s.replace(/<\/?(?:PASSIVE|S\d+|Speaker_\d+)>/gi, '').trim();
+  }
+
   function parseTranscriptLine(line) {
     // "[14:32:05] Alice: We're seeing 5xx errors" or "Alice: text"
-    const m = line.match(/^\[(\d{2}:\d{2}:\d{2})\]\s+(.+?):\s*(.*)$/);
+    var clean = stripSpeakerTags(line);
+    const m = clean.match(/^\[(\d{2}:\d{2}:\d{2})\]\s+(.+?):\s*(.*)$/);
     if (m) return { time: m[1], speaker: m[2], text: m[3] };
-    const m2 = line.match(/^(.+?):\s*(.*)$/);
+    const m2 = clean.match(/^(.+?):\s*(.*)$/);
     if (m2) return { time: '', speaker: m2[1], text: m2[2] };
-    return { time: '', speaker: '', text: line };
+    return { time: '', speaker: '', text: clean };
   }
 
   function addTranscript(line) {
@@ -404,7 +410,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     const div = document.createElement('div');
     const icons = { transcript: '\uD83D\uDCAC', finding: '\uD83D\uDD0D', decision: '\u2696\uFE0F' };
     div.className = `timeline-item ${type}-type`;
-    const text = typeof data === 'string' ? data : JSON.stringify(data);
+    const raw = typeof data === 'string' ? data : JSON.stringify(data);
+    const text = stripSpeakerTags(raw);
     div.innerHTML = `
       <span class="timeline-icon">${icons[type] || '\u25CB'}</span>
       <span class="timeline-text">${esc(text.substring(0, 200))}</span>

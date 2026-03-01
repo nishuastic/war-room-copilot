@@ -54,6 +54,4 @@ def __getattr__(name: str) -> object:
             "format_enrichment_for_postmortem": _fmt,
         }
         return _map[name]
-    raise AttributeError(
-        f"module {__name__!r} has no attribute {name!r}"
-    )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

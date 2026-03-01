@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>War Room Copilot - Test Client</title>
+<style>
+  body { font-family: monospace; background: #1a1d28; color: #e4e4e7; padding: 20px; }
+  h1 { color: #3b82f6; }
+  .controls { display: flex; gap: 10px; margin: 20px 0; }
+  button { padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-family: monospace; }
+  button:disabled { background: #555; cursor: not-allowed; }
+  button.danger { background: #ef4444; }
+  #status { padding: 10px; background: #2a2d3a; border-radius: 4px; margin: 10px 0; }
+  #log { background: #0f1117; padding: 10px; border-radius: 4px; max-height: 400px; overflow-y: auto; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+  .ok { color: #22c55e; }
+  .err { color: #ef4444; }
+  .info { color: #06b6d4; }
+  .warn { color: #f59e0b; }
+  a { color: #3b82f6; }
+</style>
+</head>
+<body>
+<h1>War Room Copilot - Test Client</h1>
+<div id="status">Status: Disconnected</div>
+<div class="controls">
+  <button id="connectBtn" onclick="connectRoom()">Connect</button>
+  <button id="disconnectBtn" onclick="disconnectRoom()" disabled class="danger">Disconnect</button>
+  <a href="http://localhost:8000/" target="_blank"><button type="button">Open Dashboard</button></a>
+</div>
+<div id="log"></div>
+
+<script type="module">
+import { Room, RoomEvent, Track, ConnectionState } from 'https://cdn.jsdelivr.net/npm/livekit-client@2.16.0/+esm';
+
+const TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+const URL = 'ws://localhost:7880';
+
+let room = null;
+
+function log(msg, cls = '') {
+  const el = document.getElementById('log');
+  const ts = new Date().toLocaleTimeString();
+  el.innerHTML += `<span class="${cls}">[${ts}] ${msg}</span>\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(msg, cls = '') {
+  document.getElementById('status').innerHTML = `Status: <span class="${cls}">${msg}</span>`;
+}
+
+window.connectRoom = async function() {
+  if (!TOKEN) {
+    log('ERROR: No token provided. Add ?token=YOUR_TOKEN to the URL', 'err');
+    return;
+  }
+  try {
+    room = new Room();
+
+    room.on(RoomEvent.Connected, () => {
+      log('Connected to room: ' + room.name, 'ok');
+      setStatus('Connected to ' + room.name, 'ok');
+      document.getElementById('connectBtn').disabled = true;
+      document.getElementById('disconnectBtn').disabled = false;
+    });
+
+    room.on(RoomEvent.Disconnected, () => {
+      log('Disconnected from room', 'warn');
+      setStatus('Disconnected', 'err');
+      document.getElementById('connectBtn').disabled = false;
+      document.getElementById('disconnectBtn').disabled = true;
+    });
+
+    room.on(RoomEvent.ParticipantConnected, (p) => {
+      log('Participant joined: ' + p.identity, 'info');
+    });
+
+    room.on(RoomEvent.ParticipantDisconnected, (p) => {
+      log('Participant left: ' + p.identity, 'warn');
+    });
+
+    room.on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
+      log(`Track subscribed: ${track.kind} from ${participant.identity}`, 'info');
+      if (track.kind === Track.Kind.Audio) {
+        const el = track.attach();
+        document.body.appendChild(el);
+        log('Audio track attached - you should hear the agent', 'ok');
+      }
+    });
+
+    room.on(RoomEvent.DataReceived, (payload, participant) => {
+      const text = new TextDecoder().decode(payload);
+      log(`Data from ${participant?.identity || 'unknown'}: ${text}`, 'info');
+    });
+
+    log('Connecting to ' + URL + '...', 'info');
+    setStatus('Connecting...', 'warn');
+
+    await room.connect(URL, TOKEN);
+
+    // Enable microphone
+    await room.localParticipant.setMicrophoneEnabled(true);
+    log('Microphone enabled', 'ok');
+
+  } catch (err) {
+    log('Connection error: ' + err.message, 'err');
+    setStatus('Error: ' + err.message, 'err');
+  }
+};
+
+window.disconnectRoom = async function() {
+  if (room) {
+    await room.disconnect();
+    room = null;
+  }
+};
+
+// Auto-connect if token is provided
+if (TOKEN) {
+  log('Token found, auto-connecting...', 'info');
+  setTimeout(() => window.connectRoom(), 500);
+} else {
+  log('No token in URL. Generate one and add ?token=YOUR_TOKEN', 'warn');
+  log('Or run: make token', 'info');
+}
+</script>
+</body>
+</html>

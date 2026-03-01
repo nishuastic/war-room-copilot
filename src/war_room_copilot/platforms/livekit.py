@@ -47,6 +47,11 @@ _WAKE_WORD_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Speechmatics wraps transcript text in XML-like diarization tags:
+#   <S1>text</S1>  or  <PASSIVE><S2>text</S2></PASSIVE>
+# Strip these for clean display.
+_SPEAKER_TAG_RE = re.compile(r"</?(?:PASSIVE|S\d+|Speaker_\d+)>")
+
 # Backchannel phrases for natural conversation UX.
 _BACKCHANNEL_PHRASES = [
     "mm-hmm",
@@ -433,7 +438,11 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
     def _on_transcript(event: Any) -> None:
         if not getattr(event, "is_final", False):
             return
-        text = getattr(event, "transcript", "").strip()
+        raw_text = getattr(event, "transcript", "").strip()
+        if not raw_text:
+            return
+        # Strip Speechmatics XML diarization tags for clean display
+        text = _SPEAKER_TAG_RE.sub("", raw_text).strip()
         if not text:
             return
         speaker = getattr(event, "speaker_id", None) or "Unknown"
