@@ -92,7 +92,7 @@ flowchart LR
 
 ## Current Stage: 7
 
-The agent joins a LiveKit room, transcribes speech via Speechmatics (with diarization, speaker identification, enhanced operating point, and custom vocabulary for k8s/infra terms), stores transcript in structured short-term memory and SQLite, detects decisions via LLM through Backboard, persists cross-session memory via Backboard.io, reasons about the incident via GPT-4.1-mini with GitHub and recall tools, and speaks back via ElevenLabs TTS. Stage 6 adds a read-only observability layer: a FastAPI server (port 8000) exposes the SQLite data via REST + SSE, and a React + Vite dashboard (port 5173) renders it in real time. Stage 7 adds **intent-based skill routing** — a fast GPT-4.1-nano classifier determines whether a request is debug, ideate, investigate, recall, summarize, or general, then applies a specialized prompt suffix. Confidence gating controls whether the agent speaks (>0.7), silently pushes insights to the dashboard (0.4–0.7), or discards (<0.4).
+Stage 7 combines **intent-based skill routing** and **business metrics**. A fast GPT-4.1-nano classifier routes each wake-word request to a skill (debug, ideate, investigate, recall, summarize, or general) with confidence gating: speak (>0.7), silent dashboard push (0.4–0.7), or discard (<0.4). The agent also tracks wake-word → response latency, LLM call counts, token usage, and TTS character counts in a `metrics` DB table. At session end, post-mortem interview mode asks 3 structured questions via TTS. The API exposes four new endpoints: `/metrics`, `/analytics`, `/runbooks`, and `/summary`. The dashboard has a tabbed right panel (Decisions / Metrics) with `BusinessMetrics`, `IssueAnalytics`, and `RunbookPanel` components, agent trace events merged inline into the transcript timeline, and an "Export Post-Mortem" button.
 
 ### Features
 - Speaker diarization (who said what)
@@ -126,10 +126,11 @@ The agent joins a LiveKit room, transcribes speech via Speechmatics (with diariz
 | Decision Tracker | `src/war_room_copilot/memory/decisions.py` | LLM-based decision detection via Backboard |
 | SQLite DB | `src/war_room_copilot/memory/db.py` | `IncidentDB` for sessions, transcript, decisions, and agent_trace (WAL mode) |
 | API Server | `src/war_room_copilot/api/main.py` | FastAPI server — REST + SSE observability layer |
-| REST Routes | `src/war_room_copilot/api/routes/sessions.py` | GET /sessions, /sessions/{id}, /transcript, /decisions |
+| REST Routes | `src/war_room_copilot/api/routes/sessions.py` | GET /sessions, /transcript, /decisions, /metrics, /analytics, /runbooks, /summary |
 | SSE Routes | `src/war_room_copilot/api/routes/stream.py` | SSE /sessions/{id}/stream, /trace, /latest/id |
-| Dashboard | `frontend/` | React + Vite — TranscriptViewer, AgentTrace, IncidentTimeline, DecisionList |
-| Config | `src/war_room_copilot/config.py` | Centralized configuration (model, voice, paths, repos, memory) |
+| Dashboard | `frontend/` | React + Vite — TranscriptViewer, AgentTrace, DecisionList, BusinessMetrics, IssueAnalytics, RunbookPanel |
+| Config | `src/war_room_copilot/config.py` | Centralized configuration (model, voice, paths, repos, memory, cost rates) |
+| Runbooks | `mock_data/runbooks.yaml` | 8 SRE runbooks with keywords + steps for keyword-matched suggestions |
 | Models | `src/war_room_copilot/models.py` | Pydantic models (`SpeakerMetadata`, `TranscriptSegment`, `Decision`) |
 | Prompt | `assets/agent.md` | Agent system instructions (incident reasoning + tools + memory) |
 | Dictionary | `assets/k8s_dictionary.json` | Custom vocabulary for Speechmatics STT |

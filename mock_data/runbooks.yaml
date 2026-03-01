@@ -1,0 +1,96 @@
+- id: db-connection-pool
+  title: "Database Connection Pool Exhaustion"
+  keywords: ["database", "connection", "pool", "timeout", "db", "postgres", "mysql", "sql"]
+  steps:
+    - "Check current connection count: SELECT count(*) FROM pg_stat_activity;"
+    - "Identify long-running queries: SELECT pid, query, state, now() - query_start AS duration FROM pg_stat_activity ORDER BY duration DESC LIMIT 10;"
+    - "Kill idle connections if needed: SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND now() - state_change > interval '5 minutes';"
+    - "Check pool config in app: verify max_connections and pool_size settings"
+    - "Scale connection pooler (PgBouncer) if persistent: kubectl scale deployment pgbouncer --replicas=3"
+    - "Alert: monitor pg_stat_activity for the next 30 minutes"
+
+- id: k8s-pod-crashloop
+  title: "Kubernetes Pod CrashLoopBackOff"
+  keywords: ["pod", "crashloop", "crash", "k8s", "kubernetes", "kubectl", "restart", "backoff", "oomkilled"]
+  steps:
+    - "Check pod status: kubectl get pods -n <namespace> | grep CrashLoop"
+    - "Get recent events: kubectl describe pod <pod-name> -n <namespace>"
+    - "Check logs from last crash: kubectl logs <pod-name> -n <namespace> --previous"
+    - "Check resource limits: kubectl get pod <pod-name> -o yaml | grep -A5 resources"
+    - "If OOMKilled: increase memory limit or investigate memory leak"
+    - "If config error: kubectl exec into a working pod and verify env vars"
+    - "Rollback if recent deploy: kubectl rollout undo deployment/<name> -n <namespace>"
+
+- id: high-error-rate
+  title: "Elevated API Error Rate (5xx)"
+  keywords: ["error", "5xx", "500", "502", "503", "504", "latency", "timeout", "api", "http"]
+  steps:
+    - "Check error rate in Grafana: dashboard 'API Health' → panel 'Error Rate by Service'"
+    - "Identify affected endpoints: query logs with: level=error AND status>=500"
+    - "Check downstream dependencies: run health checks on DB, cache, and external APIs"
+    - "Review recent deployments: git log --oneline -20 and kubectl rollout history"
+    - "Check CPU/memory: kubectl top pods -n <namespace>"
+    - "Enable circuit breaker if cascade failing: set CIRCUIT_BREAKER_ENABLED=true"
+    - "Rollback if deploy-related: kubectl rollout undo deployment/<name>"
+    - "Post incident: add 5xx to SLO error budget burn alert"
+
+- id: redis-memory-full
+  title: "Redis Memory Full / Eviction"
+  keywords: ["redis", "cache", "memory", "eviction", "maxmemory", "oom", "cache miss"]
+  steps:
+    - "Check memory usage: redis-cli INFO memory | grep used_memory_human"
+    - "Check eviction policy: redis-cli CONFIG GET maxmemory-policy"
+    - "List top memory consumers: redis-cli --bigkeys"
+    - "If cache bloat: flush expired keys with redis-cli DEBUG SLEEP 0 or selective DEL"
+    - "Increase maxmemory if appropriate: redis-cli CONFIG SET maxmemory 4gb"
+    - "Scale Redis cluster if persistent: add replica or upgrade instance type"
+    - "Review TTL strategy: ensure all keys have appropriate expiry set"
+
+- id: cert-expiry
+  title: "TLS Certificate Expiring / Expired"
+  keywords: ["certificate", "cert", "tls", "ssl", "expir", "https", "x509", "handshake"]
+  steps:
+    - "Check expiry: echo | openssl s_client -connect <host>:443 2>/dev/null | openssl x509 -noout -dates"
+    - "If cert-manager: kubectl get certificate -A and kubectl describe certificate <name>"
+    - "Force renewal: kubectl delete secret <tls-secret-name> -n <namespace> (cert-manager will recreate)"
+    - "Manual renewal with Let's Encrypt: certbot renew --force-renewal"
+    - "Verify renewal: check certificate not before/after dates again"
+    - "Update monitoring: set cert expiry alert at 30 and 7 days"
+
+- id: disk-full
+  title: "Disk / PV Full"
+  keywords: ["disk", "storage", "volume", "pv", "pvc", "inode", "df", "du", "space", "full"]
+  steps:
+    - "Check disk usage: df -h and du -sh /* | sort -rh | head -20"
+    - "Check PVC usage: kubectl exec <pod> -- df -h /data"
+    - "Find large files: find / -type f -size +500M 2>/dev/null"
+    - "Clear log files if safe: truncate -s 0 /var/log/app/*.log"
+    - "Clear Docker images if on node: docker system prune -af"
+    - "Expand PVC: kubectl patch pvc <name> -p '{\"spec\":{\"resources\":{\"requests\":{\"storage\":\"50Gi\"}}}}'"
+    - "Long term: add log rotation, archive old data to S3, set up volume autoscaling"
+
+- id: deployment-rollback
+  title: "Emergency Deployment Rollback"
+  keywords: ["rollback", "deploy", "deployment", "release", "revert", "regression", "broke", "broke after deploy"]
+  steps:
+    - "Confirm deploy caused issue: compare error rate before/after deploy timestamp"
+    - "Check rollout history: kubectl rollout history deployment/<name> -n <namespace>"
+    - "Immediate rollback: kubectl rollout undo deployment/<name> -n <namespace>"
+    - "Verify rollback: kubectl rollout status deployment/<name> -n <namespace>"
+    - "Check error rate recovering: watch Grafana for 2 minutes"
+    - "If rollback insufficient: scale down to 0 replicas as emergency: kubectl scale deployment/<name> --replicas=0"
+    - "Communicate to team: post in #incidents with RCA timeline"
+    - "Block the bad commit in CI: add revert PR and merge immediately"
+
+- id: network-partition
+  title: "Network Partition / DNS Resolution Failure"
+  keywords: ["network", "dns", "partition", "unreachable", "timeout", "connect", "nslookup", "dig", "routing"]
+  steps:
+    - "Test DNS resolution: nslookup <service> and dig <domain>"
+    - "Check pod DNS config: kubectl exec <pod> -- cat /etc/resolv.conf"
+    - "Verify CoreDNS pods: kubectl get pods -n kube-system | grep coredns"
+    - "Restart CoreDNS if stuck: kubectl rollout restart deployment/coredns -n kube-system"
+    - "Test inter-pod connectivity: kubectl exec <pod-a> -- curl http://<pod-b>:<port>/health"
+    - "Check network policies: kubectl get networkpolicy -A"
+    - "If cloud provider: check VPC routing tables and security groups in AWS/GCP console"
+    - "Escalate to cloud provider if underlying network issue persists"
