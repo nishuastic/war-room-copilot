@@ -137,6 +137,8 @@ The **tools layer** provides agentic access to GitHub repos via the official Git
 - GitHub integration: issues, PRs, commits, code search (51 tools via MCP)
 - Skill-based routing (investigate, summarize, recall, respond)
 - Session memory (findings, decisions, transcript accumulate across interactions)
+- **Voice-to-graph bridge**: Voice LLM invokes LangGraph via `reason` function tool for deep reasoning
+- **Live transcript capture**: STT events feed timestamped, speaker-tagged lines into session state
 
 ### Components
 

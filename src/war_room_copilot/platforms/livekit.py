@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from livekit import agents
-from livekit.agents import Agent, AgentSession, RoomInputOptions
-from livekit.plugins import elevenlabs, openai as _openai_plugin, silero, speechmatics  # noqa: F401
+from livekit.agents import Agent, AgentSession, RoomInputOptions, RunContext, function_tool
+from livekit.plugins import elevenlabs, silero, speechmatics  # noqa: F401
 from livekit.plugins.speechmatics import SpeakerIdentifier, TurnDetectionMode
 
 from war_room_copilot.graph.incident_graph import incident_graph
@@ -72,9 +73,32 @@ async def _invoke_graph(query: str) -> str:
     return "I processed your request but have no additional information."
 
 
+@function_tool(
+    name="reason",
+    description=(
+        "Invoke the reasoning graph for deep investigation, summarization, "
+        "recall of past decisions, or any request that needs GitHub search, "
+        "incident context, or multi-step reasoning. Use this whenever the user "
+        "asks you to investigate, search code, find issues, summarize the incident, "
+        "recall what was discussed, or generate a post-mortem."
+    ),
+)
+async def reason_tool(ctx: RunContext, query: str) -> str:  # type: ignore[type-arg]
+    """Run the reasoning graph to investigate, summarize, or recall.
+
+    Args:
+        query: The user's request or question to reason about.
+    """
+    logger.info("reason_tool invoked: %s", query)
+    return await _invoke_graph(query)
+
+
 class WarRoomAgent(Agent):
     def __init__(self) -> None:
-        super().__init__(instructions=load_agent_prompt())
+        super().__init__(
+            instructions=load_agent_prompt(),
+            tools=[reason_tool],
+        )
 
 
 async def _entrypoint(ctx: agents.JobContext) -> None:
@@ -110,6 +134,22 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
         agent=WarRoomAgent(),
         room_input_options=RoomInputOptions(),
     )
+
+    # --- P0-B: Feed STT transcript into session state ---
+    @session.on("user_input_transcribed")
+    def _on_transcript(event: Any) -> None:
+        if not getattr(event, "is_final", False):
+            return
+        text = getattr(event, "transcript", "").strip()
+        if not text:
+            return
+        speaker = getattr(event, "speaker_id", None) or "Unknown"
+        # Map raw speaker ID to known name if available
+        display_name = _session_state["speakers"].get(speaker, speaker)
+        ts = datetime.now(tz=timezone.utc).strftime("%H:%M:%S")
+        line = f"[{ts}] {display_name}: {text}"
+        _session_state["transcript"].append(line)
+        logger.debug("Transcript: %s", line)
 
     if known_speakers:
         names = ", ".join(s.label for s in known_speakers)
