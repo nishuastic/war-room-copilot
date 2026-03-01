@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from backboard import BackboardClient
+from backboard.exceptions import BackboardNotFoundError
 
 from ..config import BACKBOARD_ASSISTANT_FILE, DATA_DIR, LLM_MODEL
 
@@ -26,9 +27,16 @@ class LongTermMemory:
         if BACKBOARD_ASSISTANT_FILE.exists():
             with open(BACKBOARD_ASSISTANT_FILE) as f:
                 data = json.load(f)
-            self._assistant_id = data["assistant_id"]
-            logger.info("Loaded Backboard assistant: %s", self._assistant_id)
-            return
+            candidate_id = data["assistant_id"]
+            # Verify the assistant still exists before caching its ID
+            try:
+                await self._client.get_assistant(candidate_id)
+                self._assistant_id = candidate_id
+                logger.info("Loaded Backboard assistant: %s", self._assistant_id)
+                return
+            except BackboardNotFoundError:
+                logger.warning("Cached Backboard assistant %s not found — recreating", candidate_id)
+                BACKBOARD_ASSISTANT_FILE.unlink(missing_ok=True)
 
         assistant: Any = await self._client.create_assistant(
             name="War Room Copilot",

@@ -98,16 +98,33 @@ def load_known_speakers() -> list[SpeakerMetadata]:
 
 
 def save_speakers(raw_speakers: list[Any]) -> None:
+    # Load existing data to preserve custom labels
+    existing: dict[str, dict] = {}
+    if SPEAKERS_FILE.exists():
+        with open(SPEAKERS_FILE) as f:
+            for entry in json.load(f):
+                for sid in entry.get("speaker_identifiers", []):
+                    existing[sid] = entry
+
     data = []
+    seen_labels: set[str] = set()
     for speaker in raw_speakers:
         if isinstance(speaker, dict):
             label, ids = speaker.get("label", ""), speaker.get("speaker_identifiers", [])
         else:
             label, ids = speaker.label, speaker.speaker_identifiers
-        if label and ids:
-            if RESERVED_LABEL.match(label):
-                label = f"Speaker_{label[1:]}"
+        if not (label and ids):
+            continue
+        if RESERVED_LABEL.match(label):
+            label = f"Speaker_{label[1:]}"
+        # If any identifier matches an existing entry, use its label
+        for sid in ids:
+            if sid in existing and not RESERVED_LABEL.match(existing[sid]["label"]):
+                label = existing[sid]["label"]
+                break
+        if label not in seen_labels:
             data.append({"label": label, "speaker_identifiers": ids})
+            seen_labels.add(label)
     if data:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         with open(SPEAKERS_FILE, "w") as f:
@@ -503,6 +520,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             for question in postmortem_questions:
                 await session.say(question, allow_interruptions=True)
                 await asyncio.sleep(15)  # Wait for verbal response
+        except RuntimeError as e:
+            # AgentSession may already be stopped by the time on_shutdown fires
+            logger.debug("Post-mortem interview skipped: %s", e)
         except Exception:
             logger.exception("Post-mortem interview failed")
 
