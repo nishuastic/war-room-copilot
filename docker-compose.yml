@@ -32,6 +32,7 @@ services:
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=secret
       - GITHUB_MCP_URL=http://github-mcp-server:8090/mcp
+      - DEMO_MODE=${DEMO_MODE:-}
     ports:
       - "8000:8000"  # Dashboard API
     volumes:

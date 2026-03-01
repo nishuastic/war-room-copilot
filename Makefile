@@ -5,7 +5,7 @@ export NODE_IP
 
 ROOM ?= war-room
 
-.PHONY: up down restart logs token kill-orphans playground dashboard demo demo-stop
+.PHONY: up down restart logs token kill-orphans playground dashboard demo demo-stop demo-live
 
 # Kill orphaned Python workers from previous `dev` mode runs before starting
 # Docker. These zombies connect to :7880 and steal jobs from the real agent.
@@ -59,3 +59,10 @@ demo-stop:
 	@docker compose -f docker-compose.demo.yml down
 	@pkill -f "war_room_copilot.api.demo_server" 2>/dev/null || true
 	@echo "Demo stopped."
+
+# Live demo: full stack (LiveKit + voice) with pre-seeded incident context.
+# Dashboard starts populated; you talk to the agent live.
+demo-live: kill-orphans
+	@echo "NODE_IP=$(NODE_IP)"
+	@echo "Starting live demo (DEMO_MODE=1 — pre-seeded incident context)..."
+	DEMO_MODE=1 docker compose up --build
