@@ -125,7 +125,7 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
     session = AgentSession(  # type: ignore[var-annotated]
         stt=stt,
         llm=create_llm(),
-        tts=elevenlabs.TTS(voice_id="21m00Tcm4TlvDq8ikWAM"),
+        tts=elevenlabs.TTS(model="eleven_turbo_v2_5"),
         vad=silero.VAD.load(),
     )
 

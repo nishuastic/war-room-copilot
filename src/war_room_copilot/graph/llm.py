@@ -37,7 +37,14 @@ def get_graph_llm() -> Any:
         logger.info("Graph LLM: Anthropic %s", model)
         return ChatAnthropic(model_name=model, temperature=0)  # type: ignore[call-arg]
 
+    if provider == "google":
+        from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore[import-untyped]
+
+        model = model or "gemini-2.0-flash"
+        logger.info("Graph LLM: Google %s", model)
+        return ChatGoogleGenerativeAI(model=model, temperature=0)  # type: ignore[call-arg]
+
     raise ValueError(
         f"Unsupported graph LLM provider: {provider!r}. "
-        "Supported for graph nodes: openai, anthropic"
+        "Supported for graph nodes: openai, anthropic, google"
     )

@@ -34,4 +34,4 @@ ENV PATH="/app/.venv/bin:$PATH" \
     HOME=/app
 
 ENTRYPOINT ["python", "-m", "src.war_room_copilot.core.agent"]
-CMD ["dev"]
+CMD ["start"]
