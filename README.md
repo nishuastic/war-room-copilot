@@ -43,6 +43,8 @@ Edit `.env` and set your API keys:
 | --- | --- | --- |
 | `LLM_PROVIDER` | No | LLM provider: `openai` (default), `anthropic`, or `google` |
 | `LLM_MODEL` | No | Model name (defaults: `gpt-4o-mini`, `claude-sonnet-4-20250514`, `gemini-2.0-flash`) |
+| `TTS_PROVIDER` | No | TTS provider: `openai` (default), `elevenlabs`, or `google` |
+| `TTS_MODEL` | No | TTS model name (defaults: `gpt-4o-mini-tts`, `eleven_turbo_v2_5`) |
 | `OPENAI_API_KEY` | Yes* | OpenAI API key (*required when using OpenAI provider) |
 | `ANTHROPIC_API_KEY` | No* | Anthropic API key (*required when using Anthropic provider) |
 | `GOOGLE_API_KEY` | No* | Google API key (*required when using Google provider) |

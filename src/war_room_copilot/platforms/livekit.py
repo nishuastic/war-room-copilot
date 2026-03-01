@@ -15,7 +15,7 @@ from livekit.agents import (
     RunContext,
     function_tool,
 )
-from livekit.plugins import elevenlabs, silero, speechmatics  # noqa: F401
+from livekit.plugins import silero, speechmatics  # noqa: F401
 from livekit.plugins.speechmatics import SpeakerIdentifier, TurnDetectionMode
 from speechmatics.voice._models import AdditionalVocabEntry
 
@@ -29,6 +29,7 @@ from war_room_copilot.platforms.base import (
     load_known_speakers,
     save_speakers,
 )
+from war_room_copilot.tts import create_tts
 
 logger = logging.getLogger("war-room-copilot.platforms.livekit")
 
@@ -206,13 +207,42 @@ def _prewarm(proc: agents.JobProcess) -> None:
     2. **Stale room cleanup** — deletes empty rooms left over from
        previous sessions so they don't block new dispatch.
     """
-    # Pre-import LLM plugins so they register on the main thread.
+    import os
+    import sys
+    import threading
+    import traceback
+
+    pid = os.getpid()
+    tid = threading.current_thread().name
+    diag = f"[PREWARM] pid={pid} thread={tid}\n"
+
+    # Pre-import LLM and TTS plugins so they register on the main thread.
     from war_room_copilot.llm import create_llm
+    from war_room_copilot.tts import create_tts
 
     try:
         create_llm()
+        diag += "[PREWARM] LLM plugin registered OK\n"
     except Exception:
+        diag += f"[PREWARM] LLM pre-import failed:\n{traceback.format_exc()}\n"
         logger.debug("LLM pre-import (expected if API key missing)", exc_info=True)
+
+    try:
+        create_tts()
+        diag += "[PREWARM] TTS plugin registered OK\n"
+    except Exception:
+        diag += f"[PREWARM] TTS pre-import failed:\n{traceback.format_exc()}\n"
+        logger.debug("TTS pre-import (expected if API key missing)", exc_info=True)
+
+    # Write diagnostics to file — child process stdout may be invisible to Docker
+    try:
+        with open(f"/app/data/prewarm_{pid}.log", "w") as f:
+            f.write(diag)
+    except OSError:
+        pass
+
+    # Also print to stderr (more likely to appear in Docker logs)
+    print(diag, file=sys.stderr, flush=True)
 
     asyncio.run(_purge_stale_rooms_async())
 
@@ -247,6 +277,25 @@ async def _purge_stale_rooms_async() -> None:
 
 async def _entrypoint(ctx: agents.JobContext) -> None:
     """LiveKit agent entrypoint — joins room, wires audio pipeline, runs."""
+    import os
+    import sys
+
+    pid = os.getpid()
+    print(f"[ENTRYPOINT] pid={pid} room={ctx.room.name}", file=sys.stderr, flush=True)
+    try:
+        await _entrypoint_inner(ctx)
+    except Exception:
+        import traceback
+
+        crash_msg = f"[ENTRYPOINT CRASH] pid={pid}\n{traceback.format_exc()}"
+        print(crash_msg, file=sys.stderr, flush=True)
+        with open(f"/app/data/entrypoint_crash_{pid}.log", "w") as _f:
+            _f.write(crash_msg)
+        raise
+
+
+async def _entrypoint_inner(ctx: agents.JobContext) -> None:
+    """Inner entrypoint — actual implementation."""
     global _session_state, _state_lock  # noqa: PLW0603
 
     await ctx.connect()
@@ -316,7 +365,7 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
     session = AgentSession(  # type: ignore[var-annotated]
         stt=stt,
         llm=create_llm(),
-        tts=elevenlabs.TTS(model="eleven_turbo_v2_5"),
+        tts=create_tts(),
         vad=silero.VAD.load(),
     )
 
@@ -556,6 +605,12 @@ class LiveKitPlatform:
             agents.WorkerOptions(
                 entrypoint_fnc=_entrypoint,
                 prewarm_fnc=_prewarm,
+                # Keep num_idle_processes at 1 for reliability.
+                # Note: orphaned local `dev` mode processes can register as ghost
+                # workers with the Docker LiveKit server, stealing jobs. If the
+                # agent fails to connect, check `lsof -i :7880` and kill any
+                # stale Python processes from previous dev runs.
+                num_idle_processes=1,
             )
         )
 

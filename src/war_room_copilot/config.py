@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     llm_provider: Literal["openai", "anthropic", "google"] = Field(default="openai")
     llm_model: str = Field(default="")  # empty = use provider default
 
+    # TTS provider
+    tts_provider: Literal["openai", "elevenlabs", "google"] = Field(default="openai")
+    tts_model: str = Field(default="")  # empty = use provider default
+
     # Speech / LLM API keys
     speechmatics_api_key: str = Field(default="")
     openai_api_key: str = Field(default="")

@@ -24,10 +24,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/.venv .venv
-COPY --from=builder /app/src src
-COPY --from=builder /app/assets assets
-COPY --from=builder /app/pyproject.toml .
+# Create non-root user BEFORE copying files — avoids expensive chown -R later
+RUN groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --no-create-home appuser
+
+# Copy with correct ownership from the start (no chown -R needed)
+COPY --from=builder --chown=appuser:appuser /app/.venv .venv
+COPY --from=builder --chown=appuser:appuser /app/src src
+COPY --from=builder --chown=appuser:appuser /app/assets assets
+COPY --from=builder --chown=appuser:appuser /app/pyproject.toml .
 
 ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
@@ -35,12 +39,14 @@ ENV PYTHONUNBUFFERED=1 \
     APP_DATA_DIR=/app/data
 
 # Persistent data directory (mounted as a Docker volume)
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /app/.models && chown -R appuser:appuser /app/data /app/.models
 
-# Run as non-root for security
-RUN groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --no-create-home appuser \
-    && chown -R appuser:appuser /app
+# Pre-download ML models that Speechmatics downloads at runtime to .models/.
+# Without this, the downloads can hang and LiveKit kills the process as unresponsive.
 USER appuser
+RUN python -c "from urllib.request import urlretrieve; \
+urlretrieve('https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx', '/app/.models/silero_vad.onnx'); \
+urlretrieve('https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.1-cpu.onnx', '/app/.models/smart-turn-v3.1-cpu.onnx')"
 
 EXPOSE 8000
 

@@ -167,6 +167,7 @@ The **dashboard API** (FastAPI SSE) streams live transcript, findings, and decis
 | Zoom Stub | `src/war_room_copilot/platforms/zoom.py` | Placeholder for Zoom integration |
 | Prompt | `assets/agent.md` | Agent system instructions |
 | Config | `src/war_room_copilot/config.py` | Centralized settings via `pydantic-settings` (env vars, timeouts, defaults) |
+| TTS Factory | `src/war_room_copilot/tts.py` | TTS factory with lazy imports; returns LiveKit-compatible TTS instance |
 | Models | `src/war_room_copilot/models.py` | Shared Pydantic models (`GitHubIssue`, `GitHubPR`, `GitHubCommit`, etc.) |
 | **Graph** | `src/war_room_copilot/graph/incident_graph.py` | **LangGraph incident investigation graph** |
 | **Graph State** | `src/war_room_copilot/graph/state.py` | **`IncidentState` TypedDict — shared memory** |
@@ -253,7 +254,7 @@ Five async tasks run in parallel with the voice loop:
 | Voice framework | LiveKit Agents | Real-time, open-source, good Python SDK |
 | STT | Speechmatics | Enhanced mode, diarization, speaker ID, smart turn detection |
 | Voice LLM | Configurable (OpenAI/Anthropic/Google) | Swappable via `LLM_PROVIDER` env var; factory in `llm.py` |
-| TTS | ElevenLabs | Natural voice quality |
+| TTS | Configurable (OpenAI/ElevenLabs/Google) | Swappable via `TTS_PROVIDER` env var; factory in `tts.py` |
 | VAD | Silero | Lightweight, runs locally (ONNX) |
 | **Reasoning orchestration** | **LangGraph** | **Declarative graph for skill routing, memory, multi-agent research** |
 | **Graph LLM** | **LangChain (ChatOpenAI/ChatAnthropic)** | **Required by LangGraph nodes; reads same config as voice LLM** |
