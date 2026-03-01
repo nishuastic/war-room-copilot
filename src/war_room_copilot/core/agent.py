@@ -178,6 +178,7 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
         self._session_id = session_id
         self._long_term = long_term
         self._router = router
+        self._wake_ts: float | None = None
 
     async def _run_silent_skill(
         self, context: str, user_message: str, skill_result: SkillResult
@@ -237,7 +238,8 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
         if WAKE_WORD not in segment.text.lower():
             raise StopResponse()
 
-        # Wake word detected — emit trace event
+        # Wake word detected — record timestamp for latency tracking
+        self._wake_ts = time.time()
         asyncio.create_task(
             self._db.add_trace(
                 self._session_id,
@@ -405,6 +407,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             asyncio.create_task(
                 db.add_trace(session_id, "tool_call", {"tool": tool_name, "args": raw_args})
             )
+        # Count LLM call
+        asyncio.create_task(db.update_metrics(session_id, llm_calls=1))
 
     @session.on("function_calls_finished")  # type: ignore[misc]
     def _on_tool_results(calls: Any) -> None:
@@ -422,11 +426,31 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         text = getattr(msg, "content", None) or str(msg)
         if text:
             text_str = str(text)[:1000]
+            # Compute latency from wake word to first agent speech
+            latency_ms = 0.0
+            if war_room_agent._wake_ts is not None:
+                latency_ms = (time.time() - war_room_agent._wake_ts) * 1000
+                war_room_agent._wake_ts = None
+                asyncio.create_task(
+                    db.add_trace(
+                        session_id,
+                        "latency",
+                        {"ms": round(latency_ms, 1)},
+                    )
+                )
             asyncio.create_task(db.add_trace(session_id, "llm_response", {"text": text_str}))
             asyncio.create_task(
                 db.add_segment(
                     session_id,
                     TranscriptSegment(speaker_id="sam", text=text_str, timestamp=time.time()),
+                )
+            )
+            # Track TTS chars for cost
+            asyncio.create_task(
+                db.update_metrics(
+                    session_id,
+                    elevenlabs_chars=len(text_str),
+                    latency_ms=latency_ms,
                 )
             )
 
@@ -444,6 +468,19 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     asyncio.create_task(capture_voiceprints())
 
     async def on_shutdown() -> None:
+        # Post-mortem interview mode: ask structured questions via TTS
+        try:
+            postmortem_questions = [
+                "What was the root cause of this incident?",
+                "What was the impact on users or systems?",
+                "What follow-up actions are needed to prevent recurrence?",
+            ]
+            for question in postmortem_questions:
+                await session.say(question, allow_interruptions=True)
+                await asyncio.sleep(15)  # Wait for verbal response
+        except Exception:
+            logger.exception("Post-mortem interview failed")
+
         await db.end_session(session_id)
         if decision_tracker:
             await decision_tracker.close()

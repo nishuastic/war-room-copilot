@@ -54,3 +54,12 @@ BACKBOARD_DECISION_ASSISTANT_FILE = DATA_DIR / "backboard_decision_assistant.jso
 
 # SQLite
 DB_FILE = DATA_DIR / "war_room.db"
+
+# Cost rates
+GPT4_MINI_INPUT_COST_PER_1K = 0.00015  # $0.15/1M tokens
+GPT4_MINI_OUTPUT_COST_PER_1K = 0.0006  # $0.60/1M tokens
+ELEVENLABS_COST_PER_CHAR = 0.000003  # rough estimate
+CARBON_G_PER_LLM_CALL = 0.2  # ~0.2g CO2 per call
+
+# Runbooks
+RUNBOOKS_FILE = PROJECT_ROOT / "mock_data" / "runbooks.yaml"

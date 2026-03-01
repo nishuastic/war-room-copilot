@@ -2419,8 +2419,10 @@ dependencies = [
     { name = "livekit-plugins-elevenlabs" },
     { name = "livekit-plugins-silero" },
     { name = "livekit-plugins-speechmatics" },
+    { name = "openai" },
     { name = "pygithub" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -2442,10 +2444,12 @@ requires-dist = [
     { name = "livekit-plugins-silero" },
     { name = "livekit-plugins-speechmatics" },
     { name = "mypy", marker = "extra == 'dev'" },
+    { name = "openai", specifier = ">=1.0" },
     { name = "pygithub", specifier = ">=2.1.0" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-asyncio", marker = "extra == 'dev'" },
     { name = "python-dotenv" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]
