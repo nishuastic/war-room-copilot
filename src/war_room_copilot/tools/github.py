@@ -125,7 +125,7 @@ def _commit_from_dict(d: dict[str, Any]) -> GitHubCommit:
     author_data = commit_data.get("author", {}) or {}
     return GitHubCommit(
         sha=(d.get("sha") or "")[:7],
-        message=(commit_data.get("message", "") or "").splitlines()[0],
+        message=((commit_data.get("message", "") or "").splitlines() or [""])[0],
         author=author_data.get("name", ""),
         committed_at=author_data.get("date"),
         url=d.get("html_url", ""),
