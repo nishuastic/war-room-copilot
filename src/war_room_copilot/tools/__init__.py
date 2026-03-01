@@ -20,5 +20,4 @@ __all__ = [
     "WarRoomToolError",
     "get_repo_context",
     "mcp_tool_to_schema",
-    "backboard",
 ]

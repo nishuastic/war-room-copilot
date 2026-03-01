@@ -89,5 +89,27 @@ def build_incident_graph() -> Any:
     return graph.compile()
 
 
-# Module-level compiled graph — import and use directly.
-incident_graph = build_incident_graph()
+_incident_graph: Any = None
+
+
+def get_incident_graph() -> Any:
+    """Return the compiled incident graph, building it on first call."""
+    global _incident_graph  # noqa: PLW0603
+    if _incident_graph is None:
+        _incident_graph = build_incident_graph()
+    return _incident_graph
+
+
+# Backwards-compatible lazy proxy so ``from ... import incident_graph`` still
+# works without triggering the heavy import chain at module load time.
+class _LazyGraph:
+    """Proxy that defers ``build_incident_graph()`` until first use."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_incident_graph(), name)
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        return await get_incident_graph().ainvoke(*args, **kwargs)
+
+
+incident_graph: Any = _LazyGraph()

@@ -68,7 +68,7 @@ async def summarize_node(state: IncidentState) -> dict[str, Any]:
     if not context_parts:
         summary = "No incident data to summarize yet."
         return {
-            "findings": state.get("findings", []) + [summary],
+            "findings": [summary],
             "messages": [AIMessage(content=summary)],
         }
 
@@ -89,6 +89,6 @@ async def summarize_node(state: IncidentState) -> dict[str, Any]:
         summary = "Unable to generate summary at this time."
 
     return {
-        "findings": state.get("findings", []) + [summary],
+        "findings": [summary],
         "messages": [AIMessage(content=summary)],
     }

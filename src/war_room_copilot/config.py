@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,7 +13,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # Platform — "livekit", "google_meet", or "zoom"
-    platform: str = Field(default="livekit")
+    platform: Literal["livekit", "google_meet", "zoom"] = Field(default="livekit")
 
     # LiveKit
     livekit_url: str = Field(default="ws://localhost:7880")
@@ -20,7 +21,7 @@ class Settings(BaseSettings):
     livekit_api_secret: str = Field(default="")
 
     # LLM provider
-    llm_provider: str = Field(default="openai")  # "openai" | "anthropic" | "google"
+    llm_provider: Literal["openai", "anthropic", "google"] = Field(default="openai")
     llm_model: str = Field(default="")  # empty = use provider default
 
     # Speech / LLM API keys
@@ -28,7 +29,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     anthropic_api_key: str = Field(default="")
     google_api_key: str = Field(default="")
-    elevenlabs_api_key: str = Field(default="")
+    eleven_api_key: str = Field(default="")
 
     # Integrations
     github_token: str = Field(default="")

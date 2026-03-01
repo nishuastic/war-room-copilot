@@ -35,7 +35,7 @@ def get_graph_llm() -> Any:
 
         model = model or "claude-sonnet-4-20250514"
         logger.info("Graph LLM: Anthropic %s", model)
-        return ChatAnthropic(model_name=model, temperature=0)  # type: ignore[call-arg]
+        return ChatAnthropic(model=model, temperature=0)  # type: ignore[call-arg]
 
     if provider == "google":
         from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore[import-untyped]

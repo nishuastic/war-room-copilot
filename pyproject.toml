@@ -19,18 +19,24 @@ dependencies = [
     "pydantic-settings>=2.0",
     "langgraph>=0.2",
     "langchain-openai>=0.3",
-    "langchain-anthropic>=0.3",
-    "langchain-google-genai>=2.0",
     "fastapi",
     "uvicorn[standard]",
 ]
 
 [project.optional-dependencies]
-anthropic = ["livekit-plugins-anthropic"]
-google = ["livekit-plugins-google"]
+anthropic = [
+    "livekit-plugins-anthropic",
+    "langchain-anthropic>=0.3",
+]
+google = [
+    "livekit-plugins-google",
+    "langchain-google-genai>=2.0",
+]
 all-llm = [
     "livekit-plugins-anthropic",
     "livekit-plugins-google",
+    "langchain-anthropic>=0.3",
+    "langchain-google-genai>=2.0",
 ]
 backboard = ["backboard-sdk"]
 dev = [

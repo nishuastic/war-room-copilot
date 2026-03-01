@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import operator
 from typing import Annotated, Any, TypedDict
 
 from langgraph.graph.message import add_messages
@@ -12,20 +13,22 @@ class IncidentState(TypedDict, total=False):
 
     Every node receives the full state and returns a partial update.
     ``messages`` uses the ``add_messages`` reducer so new messages are
-    appended rather than replacing the entire list.
+    appended rather than replacing the entire list.  ``transcript``,
+    ``findings``, and ``decisions`` use ``operator.add`` so nodes can
+    return just the *new* items and they are appended automatically.
     """
 
     # Conversation history (LLM messages — appended via reducer)
     messages: Annotated[list[Any], add_messages]
 
     # Raw transcript lines from STT ("<speaker>: text")
-    transcript: list[str]
+    transcript: Annotated[list[str], operator.add]
 
     # Findings from research agents (appended by nodes)
-    findings: list[str]
+    findings: Annotated[list[str], operator.add]
 
     # Tracked decisions made during the incident
-    decisions: list[str]
+    decisions: Annotated[list[str], operator.add]
 
     # Speaker map: speaker_id -> display name
     speakers: dict[str, str]
@@ -35,3 +38,6 @@ class IncidentState(TypedDict, total=False):
 
     # The user's current query / latest utterance
     query: str
+
+    # Backboard thread ID for cross-session memory (injected by platform)
+    backboard_thread_id: str

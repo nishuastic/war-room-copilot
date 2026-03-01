@@ -14,6 +14,12 @@ from war_room_copilot.graph.state import IncidentState
 
 logger = logging.getLogger("war-room-copilot.graph.nodes.postmortem")
 
+# Maximum transcript lines sent to the LLM to avoid context overflow
+_MAX_TRANSCRIPT_LINES = 100
+
+# Output directory for postmortem files (configurable, defaults to ./postmortems/)
+POSTMORTEM_DIR = Path("postmortems")
+
 POSTMORTEM_SYSTEM_PROMPT = SystemMessage(
     content="""\
 You are generating a post-mortem draft from a production incident \
@@ -44,9 +50,14 @@ async def postmortem_node(state: IncidentState) -> dict[str, Any]:
 
     context_parts: list[str] = []
     if transcript:
-        context_parts.append("Transcript:\n" + "\n".join(transcript))
+        # Truncate transcript to avoid LLM context overflow
+        truncated = transcript[-_MAX_TRANSCRIPT_LINES:]
+        prefix = ""
+        if len(transcript) > _MAX_TRANSCRIPT_LINES:
+            prefix = f"[... {len(transcript) - _MAX_TRANSCRIPT_LINES} earlier lines omitted ...]\n"
+        context_parts.append("Transcript:\n" + prefix + "\n".join(truncated))
     if findings:
-        context_parts.append("Findings:\n" + "\n".join(findings))
+        context_parts.append("Findings:\n" + "\n".join(findings[-20:]))
     if decisions:
         context_parts.append("Decisions:\n" + "\n".join(decisions))
 
@@ -70,22 +81,25 @@ async def postmortem_node(state: IncidentState) -> dict[str, Any]:
         msg = "Unable to generate post-mortem at this time."
         return {"messages": [AIMessage(content=msg)]}
 
-    # Save full post-mortem to file
+    # Save full post-mortem to a dedicated directory
     ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"postmortem_{ts}.txt"
     try:
-        Path(filename).write_text(postmortem_text, encoding="utf-8")
-        logger.info("Post-mortem saved to %s", filename)
+        POSTMORTEM_DIR.mkdir(parents=True, exist_ok=True)
+        filepath = POSTMORTEM_DIR / filename
+        filepath.write_text(postmortem_text, encoding="utf-8")
+        logger.info("Post-mortem saved to %s", filepath)
     except Exception:
         logger.exception("Failed to save post-mortem file")
+        filepath = Path(filename)
 
     # Speak a brief summary, store the full text as a finding
     summary = (
         f"I have generated a post-mortem document and saved it "
-        f"to {filename}. Here is a brief overview. " + postmortem_text[:500]
+        f"to {filepath}. Here is a brief overview. " + postmortem_text[:500]
     )
 
     return {
-        "findings": state.get("findings", []) + [f"Post-mortem generated: {filename}"],
+        "findings": [f"Post-mortem generated: {filename}"],
         "messages": [AIMessage(content=summary)],
     }

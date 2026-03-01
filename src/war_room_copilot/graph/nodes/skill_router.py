@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import SystemMessage
 
 from war_room_copilot.graph.llm import get_graph_llm
 from war_room_copilot.graph.state import IncidentState
@@ -58,7 +58,4 @@ async def skill_router_node(state: IncidentState) -> dict[str, Any]:
         skill = "respond"
 
     logger.info("Routed query to skill: %s", skill)
-    return {
-        "routed_skill": skill,
-        "messages": [AIMessage(content=f"[Router] Skill: {skill}")],
-    }
+    return {"routed_skill": skill}

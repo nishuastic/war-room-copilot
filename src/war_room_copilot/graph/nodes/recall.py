@@ -36,7 +36,7 @@ async def recall_node(state: IncidentState) -> dict[str, Any]:
     try:
         from war_room_copilot.tools.backboard import recall_memory
 
-        thread_id = state.get("backboard_thread_id")  # type: ignore[typeddict-item]
+        thread_id = state.get("backboard_thread_id")
         if thread_id:
             bb_result = await recall_memory(str(thread_id), query)
             if bb_result:
@@ -54,7 +54,7 @@ async def recall_node(state: IncidentState) -> dict[str, Any]:
     if not context_parts:
         result = "No incident history to search through yet."
         return {
-            "findings": state.get("findings", []) + [result],
+            "findings": [result],
             "messages": [AIMessage(content=result)],
         }
 
@@ -74,6 +74,6 @@ async def recall_node(state: IncidentState) -> dict[str, Any]:
         result = "Unable to search memory at this time."
 
     return {
-        "findings": state.get("findings", []) + [result],
+        "findings": [result],
         "messages": [AIMessage(content=result)],
     }

@@ -3114,8 +3114,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
-    { name = "langchain-anthropic" },
-    { name = "langchain-google-genai" },
     { name = "langchain-openai" },
     { name = "langgraph" },
     { name = "livekit-agents", extra = ["openai"] },
@@ -3131,10 +3129,13 @@ dependencies = [
 
 [package.optional-dependencies]
 all-llm = [
+    { name = "langchain-anthropic" },
+    { name = "langchain-google-genai" },
     { name = "livekit-plugins-anthropic" },
     { name = "livekit-plugins-google" },
 ]
 anthropic = [
+    { name = "langchain-anthropic" },
     { name = "livekit-plugins-anthropic" },
 ]
 backboard = [
@@ -3147,6 +3148,7 @@ dev = [
     { name = "ruff" },
 ]
 google = [
+    { name = "langchain-google-genai" },
     { name = "livekit-plugins-google" },
 ]
 
@@ -3154,8 +3156,10 @@ google = [
 requires-dist = [
     { name = "backboard-sdk", marker = "extra == 'backboard'" },
     { name = "fastapi" },
-    { name = "langchain-anthropic", specifier = ">=0.3" },
-    { name = "langchain-google-genai", specifier = ">=2.0" },
+    { name = "langchain-anthropic", marker = "extra == 'all-llm'", specifier = ">=0.3" },
+    { name = "langchain-anthropic", marker = "extra == 'anthropic'", specifier = ">=0.3" },
+    { name = "langchain-google-genai", marker = "extra == 'all-llm'", specifier = ">=2.0" },
+    { name = "langchain-google-genai", marker = "extra == 'google'", specifier = ">=2.0" },
     { name = "langchain-openai", specifier = ">=0.3" },
     { name = "langgraph", specifier = ">=0.2" },
     { name = "livekit-agents", extras = ["openai"], specifier = ">=1.0" },

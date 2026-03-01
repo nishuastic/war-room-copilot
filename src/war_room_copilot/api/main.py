@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any
 
 from fastapi import FastAPI
@@ -19,10 +20,16 @@ from starlette.responses import StreamingResponse
 logger = logging.getLogger("war-room-copilot.api")
 
 app = FastAPI(title="War Room Copilot Dashboard API")
+
+# Allow configuration via env var; defaults to localhost origins only.
+_allowed_origins = os.environ.get(
+    "DASHBOARD_CORS_ORIGINS", "http://localhost:3000,http://localhost:5173"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=_allowed_origins,
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
 
@@ -44,6 +51,9 @@ async def events() -> StreamingResponse:
         last_transcript = 0
         last_findings = 0
         last_decisions = 0
+        event_id = 0
+
+        yield "retry: 3000\n\n"
 
         while True:
             transcript = _state_ref.get("transcript", [])
@@ -51,18 +61,21 @@ async def events() -> StreamingResponse:
             decisions = _state_ref.get("decisions", [])
 
             for line in transcript[last_transcript:]:
+                event_id += 1
                 payload = json.dumps({"type": "transcript", "data": line})
-                yield f"data: {payload}\n\n"
+                yield f"id: {event_id}\ndata: {payload}\n\n"
             last_transcript = len(transcript)
 
             for finding in findings[last_findings:]:
+                event_id += 1
                 payload = json.dumps({"type": "finding", "data": finding})
-                yield f"data: {payload}\n\n"
+                yield f"id: {event_id}\ndata: {payload}\n\n"
             last_findings = len(findings)
 
             for decision in decisions[last_decisions:]:
+                event_id += 1
                 payload = json.dumps({"type": "decision", "data": decision})
-                yield f"data: {payload}\n\n"
+                yield f"id: {event_id}\ndata: {payload}\n\n"
             last_decisions = len(decisions)
 
             await asyncio.sleep(1)

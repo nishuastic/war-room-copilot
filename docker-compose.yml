@@ -20,6 +20,8 @@ services:
       - LIVEKIT_URL=ws://livekit-server:7880
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=secret
+    ports:
+      - "8000:8000"  # Dashboard API
     volumes:
       - ./speakers.json:/app/speakers.json        # voiceprint persistence
       - /var/run/docker.sock:/var/run/docker.sock  # GitHub MCP needs Docker

@@ -34,5 +34,12 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
     HOME=/app
 
+# Run as non-root for security
+RUN groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --no-create-home appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
 ENTRYPOINT ["python", "-m", "src.war_room_copilot.core.agent"]
 CMD ["start"]

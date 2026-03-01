@@ -29,7 +29,7 @@ suitable for text-to-speech", "speaker1": "name", "claim1": "what they said", \
 If no contradictions found:
 {"found": false}
 
-Only flag clear contradictions with confidence > 0.6. \
+Only flag clear contradictions with confidence > 0.7. \
 Do not flag ambiguity or opinions. Reply with ONLY the JSON object."""
 )
 
@@ -42,7 +42,7 @@ async def contradict_node(state: IncidentState) -> dict[str, Any]:
     if result and result.get("found") and result.get("confidence", 0) > 0.7:
         summary = result.get("summary", "A contradiction was detected.")
         return {
-            "findings": state.get("findings", []) + [f"Contradiction detected: {summary}"],
+            "findings": [f"Contradiction detected: {summary}"],
             "messages": [AIMessage(content=summary)],
         }
 
