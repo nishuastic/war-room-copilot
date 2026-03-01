@@ -51,6 +51,7 @@ async def events() -> StreamingResponse:
         last_transcript = 0
         last_findings = 0
         last_decisions = 0
+        last_traces = 0
         event_id = 0
 
         yield "retry: 3000\n\n"
@@ -60,6 +61,7 @@ async def events() -> StreamingResponse:
                 transcript = _state_ref.get("transcript", [])
                 findings = _state_ref.get("findings", [])
                 decisions = _state_ref.get("decisions", [])
+                graph_traces = _state_ref.get("graph_traces", [])
 
                 for line in transcript[last_transcript:]:
                     event_id += 1
@@ -78,6 +80,12 @@ async def events() -> StreamingResponse:
                     payload = json.dumps({"type": "decision", "data": decision})
                     yield f"id: {event_id}\ndata: {payload}\n\n"
                 last_decisions = len(decisions)
+
+                for trace in graph_traces[last_traces:]:
+                    event_id += 1
+                    payload = json.dumps({"type": "graph_trace", "data": trace})
+                    yield f"id: {event_id}\ndata: {payload}\n\n"
+                last_traces = len(graph_traces)
             except Exception as exc:
                 logger.error(
                     "SSE stream error (%s): %s",
@@ -106,4 +114,5 @@ async def state_snapshot() -> dict[str, Any]:
         "findings": _state_ref.get("findings", []),
         "decisions": _state_ref.get("decisions", []),
         "speakers": _state_ref.get("speakers", {}),
+        "graph_traces": _state_ref.get("graph_traces", []),
     }

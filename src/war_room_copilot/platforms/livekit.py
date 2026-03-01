@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -36,6 +37,26 @@ logger = logging.getLogger("war-room-copilot.platforms.livekit")
 # Rooms with no participants older than this are purged on worker startup.
 _STALE_ROOM_AGE_SECONDS = 120
 
+# Direct-address mode resets after this many seconds of no wake word.
+_DIRECT_ADDRESS_TIMEOUT_S = 60.0
+
+# Pattern for wake word detection.  Matches "hey copilot", "hey, copilot",
+# "hey co-pilot", "hey co pilot", etc.  Case-insensitive.
+_WAKE_WORD_RE = re.compile(
+    r"\bhey[,.]?\s+co[-\s]?pilot\b",
+    re.IGNORECASE,
+)
+
+# Backchannel phrases for natural conversation UX.
+_BACKCHANNEL_PHRASES = [
+    "mm-hmm",
+    "understood",
+    "got it",
+    "right",
+    "I see",
+    "okay",
+]
+
 # Maximum accumulated items before oldest entries are trimmed.
 _MAX_TRANSCRIPT = 500
 _MAX_FINDINGS = 100
@@ -67,6 +88,10 @@ INCIDENT_VOCAB = [
     AdditionalVocabEntry(content="war room"),
     AdditionalVocabEntry(content="p zero", sounds_like=["P0", "priority zero"]),
     AdditionalVocabEntry(content="p one", sounds_like=["P1", "priority one"]),
+    AdditionalVocabEntry(
+        content="hey copilot",
+        sounds_like=["hey co-pilot", "hey co pilot"],
+    ),
 ]
 
 
@@ -102,9 +127,9 @@ _state_lock: asyncio.Lock | None = None
 async def _invoke_graph(query: str) -> str:
     """Run the incident graph with the current session state.
 
-    The graph routes the query to the appropriate skill (investigate,
-    summarize, recall, respond) and returns the final result text.
-    State is accumulated across calls so the graph has memory.
+    Uses ``astream()`` to get per-node updates, logging each step and
+    emitting trace events to the dashboard.  State is accumulated across
+    calls so the graph has memory.
     """
     assert _state_lock is not None, "_entrypoint must initialize _state_lock"
 
@@ -114,7 +139,30 @@ async def _invoke_graph(query: str) -> str:
             "query": query,
         }
 
-    result = await incident_graph.ainvoke(input_state)
+    # Stream through the graph node-by-node for observability
+    result: dict[str, Any] = {}
+    async for chunk in incident_graph.astream(input_state):
+        # Each chunk is a dict keyed by node name with that node's output
+        for node_name, node_output in chunk.items():
+            if node_name == "__end__":
+                continue
+            logger.info("[Graph] %s completed", node_name)
+            # Emit trace event to dashboard via session state
+            trace_entry = {
+                "node": node_name,
+                "query": query,
+                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            }
+            async with _state_lock:
+                traces = _session_state.setdefault("graph_traces", [])
+                traces.append(trace_entry)
+            # Merge node output into result (last write wins per key)
+            if isinstance(node_output, dict):
+                for k, v in node_output.items():
+                    if k in ("findings", "decisions", "transcript") and isinstance(v, list):
+                        result.setdefault(k, []).extend(v)
+                    else:
+                        result[k] = v
 
     # Persist accumulated state for next invocation (with trimming)
     async with _state_lock:
@@ -309,6 +357,8 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
         "decisions": [],
         "speakers": {},
         "messages": [],
+        "direct_address": False,
+        "direct_address_until": 0.0,
     }
     _state_lock = asyncio.Lock()
 
@@ -404,6 +454,33 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
                 -_MAX_TRANSCRIPT:
             ]
         logger.debug("Transcript: %s", line)
+
+        # --- Wake word detection ---
+        if _WAKE_WORD_RE.search(text):
+            _session_state["direct_address"] = True
+            _session_state["direct_address_until"] = (
+                time.time() + _DIRECT_ADDRESS_TIMEOUT_S
+            )
+            logger.info(
+                "Wake word detected from %s — direct address mode ON",
+                display_name,
+            )
+            _launch_task(
+                session.generate_reply(
+                    instructions=(
+                        f"{display_name} said 'hey copilot'. "
+                        "Acknowledge briefly that you are listening "
+                        "and ready to help."
+                    )
+                ),
+                name="wake_word_ack",
+            )
+        elif (
+            _session_state["direct_address"]
+            and time.time() > _session_state["direct_address_until"]
+        ):
+            _session_state["direct_address"] = False
+            logger.info("Direct address mode timed out — OFF")
 
     if known_speakers:
         names = ", ".join(s.label for s in known_speakers)
@@ -581,11 +658,65 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
                 exc,
             )
 
+    # --- Backchanneling (natural conversation UX) ---
+    _backchannel_idx = 0
+
+    async def backchannel_monitor() -> None:
+        """Produce short acknowledgments during long monologues.
+
+        If the same speaker has been talking for >20 seconds without
+        the agent responding, emit a brief backchannel utterance to
+        signal active listening.  Avoids interrupting and rotates
+        through phrases so it doesn't sound robotic.
+        """
+        nonlocal _backchannel_idx
+        import random
+
+        last_backchannel_time = time.time()
+        await asyncio.sleep(20)  # wait for conversation to start
+        while True:
+            async with _state_lock:
+                structured = list(
+                    _session_state.get("transcript_structured", [])
+                )
+            now = time.time()
+            if len(structured) >= 3:
+                # Check if last 3+ entries are from the same speaker
+                # and span >20s without agent response
+                recent = structured[-5:]
+                speakers = {e["speaker"] for e in recent}
+                if (
+                    len(speakers) == 1
+                    and "agent" not in next(iter(speakers)).lower()
+                    and (now - last_backchannel_time) > 20
+                ):
+                    earliest = recent[0].get("epoch", now)
+                    if now - earliest > 20:
+                        phrase = _BACKCHANNEL_PHRASES[
+                            _backchannel_idx % len(_BACKCHANNEL_PHRASES)
+                        ]
+                        _backchannel_idx += 1
+                        try:
+                            await session.generate_reply(
+                                instructions=(
+                                    f"Say only '{phrase}' — nothing "
+                                    "more. Do not elaborate."
+                                )
+                            )
+                            last_backchannel_time = time.time()
+                        except Exception as exc:
+                            logger.debug(
+                                "Backchannel failed: %s", exc
+                            )
+            # Jitter to avoid predictable timing
+            await asyncio.sleep(15 + random.uniform(0, 5))
+
     _launch_task(capture_voiceprints(), name="capture_voiceprints")
     _launch_task(monitor_contradictions(), name="monitor_contradictions")
     _launch_task(monitor_decisions(), name="monitor_decisions")
     _launch_task(sync_to_backboard(), name="sync_to_backboard")
     _launch_task(start_dashboard_api(), name="start_dashboard_api")
+    _launch_task(backchannel_monitor(), name="backchannel_monitor")
 
     await disconnect_event.wait()
     logger.info("Room disconnected, entrypoint exiting")

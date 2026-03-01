@@ -113,11 +113,75 @@ async def _search_issues(client: GitHubMCPClient, query: str) -> str:
         return f"[GitHub Issues] {issue_text[:500]}"
 
 
+async def _get_recent_commits(client: GitHubMCPClient) -> str:
+    """Fetch recent commits for the default repo."""
+    cfg = get_settings()
+    owner = cfg.default_repo_owner
+    repo = cfg.default_repo_name
+    if not owner or not repo:
+        return "[GitHub Commits] No default repo configured."
+
+    try:
+        result = await client.call_tool(
+            "list_commits",
+            {"owner": owner, "repo": repo, "perPage": 10},
+        )
+        text = _content_to_text(result)
+        try:
+            commits = json.loads(text)
+            if isinstance(commits, list):
+                lines = []
+                for c in commits[:10]:
+                    sha = c.get("sha", "?")[:7]
+                    msg = c.get("commit", {}).get("message", "?").splitlines()[0]
+                    lines.append(f"  - {sha} {msg}")
+                return f"[GitHub Recent Commits] {len(commits)} commits:\n" + "\n".join(lines)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return f"[GitHub Recent Commits] {text[:500]}"
+    except Exception as exc:
+        return f"[GitHub Recent Commits] Error: {exc}"
+
+
+async def _generate_hypothesis(
+    query: str, findings: list[str], transcript: list[str]
+) -> str:
+    """Use the graph LLM to generate a root cause hypothesis from findings + transcript."""
+    from war_room_copilot.graph.llm import get_graph_llm
+
+    llm = get_graph_llm()
+    findings_text = "\n".join(findings)
+    transcript_text = "\n".join(transcript[-20:]) if transcript else "(no transcript)"
+
+    prompt = (
+        "You are an SRE analyzing a production incident. Based on the GitHub research "
+        "findings and the recent incident transcript, generate a root cause hypothesis.\n\n"
+        f"## Incident Query\n{query}\n\n"
+        f"## GitHub Findings\n{findings_text}\n\n"
+        f"## Recent Transcript\n{transcript_text}\n\n"
+        "## Instructions\n"
+        "1. Correlate the code changes, issues, and search results with what was discussed.\n"
+        "2. Generate a concise root cause hypothesis (2-3 sentences).\n"
+        "3. List supporting evidence (bullet points).\n"
+        "4. Rate your confidence: LOW / MEDIUM / HIGH.\n\n"
+        "Format:\n"
+        "**Hypothesis:** <your hypothesis>\n"
+        "**Evidence:**\n- <point 1>\n- <point 2>\n"
+        "**Confidence:** <LOW|MEDIUM|HIGH>"
+    )
+
+    from langchain_core.messages import HumanMessage
+
+    response = await llm.ainvoke([HumanMessage(content=prompt)])
+    return f"[Root Cause Hypothesis]\n{response.content}"
+
+
 async def github_research_node(state: IncidentState) -> dict[str, Any]:
     """Research GitHub for context relevant to the current query.
 
-    Calls search_code and search_issues in parallel, then appends a
-    formatted summary to ``findings``.
+    Calls search_code, search_issues, and recent commits in parallel,
+    then generates a root cause hypothesis correlating findings with
+    the incident transcript.
     """
     query = state.get("query", "")
     if not query:
@@ -133,11 +197,12 @@ async def github_research_node(state: IncidentState) -> dict[str, Any]:
             "messages": [AIMessage(content=finding)],
         }
 
-    # Run code and issue searches in parallel
+    # Run code search, issue search, and recent commits in parallel
     findings: list[str] = []
-    code_result, issue_result = await asyncio.gather(
+    code_result, issue_result, commits_result = await asyncio.gather(
         _search_code(client, query),
         _search_issues(client, query),
+        _get_recent_commits(client),
         return_exceptions=True,
     )
 
@@ -152,6 +217,21 @@ async def github_research_node(state: IncidentState) -> dict[str, Any]:
     elif isinstance(issue_result, Exception):
         logger.warning("Issue search failed: %s", issue_result)
         findings.append(f"[GitHub Issues] Error: {issue_result}")
+
+    if isinstance(commits_result, str):
+        findings.append(commits_result)
+    elif isinstance(commits_result, Exception):
+        logger.warning("Commits fetch failed: %s", commits_result)
+        findings.append(f"[GitHub Commits] Error: {commits_result}")
+
+    # Generate root cause hypothesis by correlating findings with transcript
+    transcript = state.get("transcript", [])
+    try:
+        hypothesis = await _generate_hypothesis(query, findings, transcript)
+        findings.append(hypothesis)
+    except Exception as exc:
+        logger.warning("Hypothesis generation failed: %s", exc)
+        findings.append(f"[Root Cause Hypothesis] Could not generate: {exc}")
 
     summary = "\n".join(findings) if findings else "[GitHub] No results found."
     return {

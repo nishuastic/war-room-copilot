@@ -45,6 +45,20 @@ class Settings(BaseSettings):
     github_mcp_timeout: float = Field(default=30.0)
     github_mcp_connect_timeout: float = Field(default=10.0)
 
+    # PagerDuty MCP (sidecar in Docker Compose, or local instance)
+    pagerduty_api_key: str = Field(default="")
+    pagerduty_mcp_url: str = Field(default="http://localhost:8091/mcp")
+    pagerduty_mcp_timeout: float = Field(default=30.0)
+    pagerduty_mcp_connect_timeout: float = Field(default=10.0)
+
+    # Sentry MCP (sidecar in Docker Compose, or local instance)
+    sentry_auth_token: str = Field(default="")
+    sentry_mcp_url: str = Field(default="http://localhost:8092/mcp")
+    sentry_mcp_timeout: float = Field(default=30.0)
+    sentry_mcp_connect_timeout: float = Field(default=10.0)
+    default_sentry_org: str = Field(default="")
+    default_sentry_project: str = Field(default="")
+
     # Google Meet (future)
     google_meet_bot_email: str = Field(default="")
 

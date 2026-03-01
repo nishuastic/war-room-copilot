@@ -111,5 +111,9 @@ class _LazyGraph:
     async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
         return await get_incident_graph().ainvoke(*args, **kwargs)
 
+    async def astream(self, *args: Any, **kwargs: Any) -> Any:
+        async for chunk in get_incident_graph().astream(*args, **kwargs):
+            yield chunk
+
 
 incident_graph: Any = _LazyGraph()
