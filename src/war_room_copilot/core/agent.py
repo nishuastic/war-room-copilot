@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import AsyncIterable
 from typing import Any
 
 from dotenv import load_dotenv
@@ -29,6 +30,8 @@ for _logger_name in (
 
 from livekit import agents
 from livekit.agents import Agent, AgentSession, RoomInputOptions, StopResponse, llm
+from livekit.agents.llm import ChatChunk
+from livekit.agents.voice import ModelSettings
 from livekit.plugins import openai, silero, speechmatics
 from livekit.plugins.speechmatics import (
     AdditionalVocabEntry,
@@ -39,6 +42,7 @@ from livekit.plugins.speechmatics import (
 
 from ..config import (
     AGENT_PROMPT_FILE,
+    BACKBOARD_LLM_MODEL,
     CONFIDENCE_DASHBOARD,
     CONFIDENCE_SPEAK,
     DATA_DIR,
@@ -58,6 +62,7 @@ from ..config import (
 )
 from ..memory import DecisionTracker, IncidentDB, LongTermMemory, ShortTermMemory
 from ..models import SpeakerMetadata, TranscriptSegment
+from ..plugins.backboard import BackboardLLM, SessionStore
 from ..skills import SKILL_PROMPTS, SkillResult, SkillRouter
 from ..skills.investigation import run_investigation
 from ..skills.models import Skill
@@ -228,6 +233,7 @@ class WarRoomAgent(Agent):
         session_id: int,
         long_term: LongTermMemory | None,
         router: SkillRouter,
+        backboard_llm: BackboardLLM | None = None,
     ) -> None:
         super().__init__(instructions=instructions)
         self._base_instructions = instructions
@@ -237,6 +243,7 @@ class WarRoomAgent(Agent):
         self._session_id = session_id
         self._long_term = long_term
         self._router = router
+        self._backboard_llm = backboard_llm
         self._wake_ts: float | None = None
         # Wake word sentence buffer — collects segments for WAKE_WORD_BUFFER seconds
         self._wake_buffer: list[str] = []
@@ -246,6 +253,46 @@ class WarRoomAgent(Agent):
         self._pending_result: str | None = None
         self._async_task: asyncio.Task[None] | None = None
         self._investigate_notified: bool = False
+        # Backboard LLM routing state for recall skill
+        self._use_backboard_for_next_reply: bool = False
+        self._recall_local_context: str = ""
+
+    async def llm_node(
+        self,
+        chat_ctx: llm.ChatContext,
+        tools: list[llm.Tool],
+        model_settings: ModelSettings,
+    ) -> AsyncIterable[ChatChunk | str]:
+        """Override to route recall queries through BackboardLLM instead of OpenAI."""
+        if self._use_backboard_for_next_reply and self._backboard_llm is not None:
+            self._use_backboard_for_next_reply = False
+
+            # Inject local SQLite decision context if available
+            if self._recall_local_context:
+                chat_ctx = chat_ctx.copy()
+                chat_ctx.add_message(
+                    role="system",
+                    content=(
+                        f"[LOCAL DECISION RECORDS]\n{self._recall_local_context}\n\n"
+                        "Use these alongside your long-term memory to answer."
+                    ),
+                )
+                self._recall_local_context = ""
+
+            # Route through BackboardLLM — no tools, Backboard handles RAG + memory
+            stream = self._backboard_llm.chat(chat_ctx=chat_ctx, tools=[])
+            async for chunk in stream:
+                yield chunk
+        else:
+            # Default path — delegate to Agent.default.llm_node
+            default_stream: Any = Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+            if hasattr(default_stream, "__aiter__"):
+                async for chunk in default_stream:
+                    yield chunk
+            else:
+                result = await default_stream
+                if result is not None:
+                    yield result
 
     async def _run_silent_skill(
         self, context: str, user_message: str, skill_result: SkillResult
@@ -451,6 +498,40 @@ class WarRoomAgent(Agent):
                     pass
             return
 
+        # --- RECALL via BackboardLLM: stream directly, skip double-LLM path ---
+        if skill_result.skill == Skill.RECALL and self._backboard_llm is not None:
+            logger.info("recall skill — routing through BackboardLLM for: %s", combined_text)
+            try:
+                # Gather local SQLite decisions for context injection
+                local_decisions = await self._db.search_decisions(combined_text)
+                if local_decisions:
+                    self._recall_local_context = "\n".join(
+                        f"- [{d.speaker_id}] {d.text} (confidence: {d.confidence:.1f})"
+                        for d in local_decisions[:5]
+                    )
+
+                skill_prompt = SKILL_PROMPTS.get(skill_result.skill, "")
+                if skill_prompt:
+                    await self.update_instructions(self._base_instructions + skill_prompt)
+
+                self._use_backboard_for_next_reply = True
+                handle = self.session.generate_reply(
+                    user_input=f"[{speaker}] {combined_text}",
+                    tool_choice="none",
+                )
+                logger.info("BackboardLLM generate_reply handle %s", handle.id)
+                await handle
+                logger.info("BackboardLLM speech playout complete for handle %s", handle.id)
+            except Exception:
+                logger.exception(
+                    "BackboardLLM recall failed — falling back to recall_decision tool path"
+                )
+                self._use_backboard_for_next_reply = False
+                self._recall_local_context = ""
+                # Fall through to the default path below
+            else:
+                return
+
         # --- All other skills: apply skill prompt and generate reply ---
         skill_prompt = SKILL_PROMPTS.get(skill_result.skill, "")
         if skill_prompt:
@@ -545,8 +626,30 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     else:
         logger.warning("BACKBOARD_API_KEY not set — long-term memory disabled")
 
-    # Set up recall tool context
+    # Set up recall tool context (fallback path when BackboardLLM is unavailable)
     set_memory_context(db, long_term, session_id)  # type: ignore[arg-type]
+
+    # Initialize BackboardLLM for direct recall streaming (avoids double-LLM path)
+    backboard_llm: BackboardLLM | None = None
+    if backboard_key and long_term and long_term.assistant_id and long_term.thread_id:
+        try:
+            store = SessionStore(
+                api_key=backboard_key,
+                assistant_id=long_term.assistant_id,
+            )
+            store.set_thread("default", long_term.thread_id)
+            backboard_llm = BackboardLLM(
+                api_key=backboard_key,
+                assistant_id=long_term.assistant_id,
+                llm_provider="openai",
+                model_name=BACKBOARD_LLM_MODEL,
+                memory="auto",
+                session_store=store,
+            )
+            logger.info("BackboardLLM initialized for direct recall streaming")
+        except Exception:
+            logger.exception("Failed to initialize BackboardLLM — recall will use tool fallback")
+            backboard_llm = None
 
     stt = speechmatics.STT(
         turn_detection_mode=TurnDetectionMode.SMART_TURN,
@@ -588,6 +691,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         session_id=session_id,
         long_term=long_term,
         router=router,
+        backboard_llm=backboard_llm,
     )
 
     await session.start(
@@ -697,6 +801,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         await db.end_session(session_id)
         if decision_tracker:
             await decision_tracker.close()
+        if backboard_llm:
+            await backboard_llm.aclose()
         if long_term:
             await long_term.close()
         await db.close()

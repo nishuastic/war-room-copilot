@@ -49,6 +49,9 @@ SKILL_LLM_MODELS: dict[str, tuple[str, str]] = {
     "general": ("openai", "gpt-4.1"),
 }
 
+# Backboard LLM (for recall skill — streams directly through Backboard instead of double-LLM)
+BACKBOARD_LLM_MODEL = LLM_MODEL
+
 # TTS
 SPEECHMATICS_TTS_VOICE = "jack"  # Options: sarah (UK F), theo (UK M), megan (US F), jack (US M)
 

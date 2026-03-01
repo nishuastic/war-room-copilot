@@ -23,8 +23,9 @@ SKILL_PROMPTS: dict[Skill, str] = {
     ),
     Skill.RECALL: (
         "\n\n## Active Skill: Recall\n"
-        "Use recall_decision to look up past decisions. "
-        "Be specific: who decided what, when. If nothing found, say so."
+        "The user is asking about past decisions, incidents, or history. "
+        "You have access to long-term memory. Be specific about who decided what and when. "
+        "If nothing found, say so."
     ),
     Skill.GENERAL: "",
 }

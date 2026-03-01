@@ -1,0 +1,300 @@
+"""Backboard.io LLM plugin for LiveKit Agents.
+
+Implements LiveKit's llm.LLM / llm.LLMStream interface to integrate
+Backboard's thread-based conversation API (with persistent memory
+and RAG) into a LiveKit Agents voice pipeline.
+
+Vendored from livekit/agents PR #4964.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import uuid
+from typing import Any
+
+import httpx
+from livekit.agents import APIConnectionError, APIStatusError, APITimeoutError, llm
+from livekit.agents.llm import (
+    ChatChunk,
+    ChatContext,
+    ChoiceDelta,
+    CompletionUsage,
+    Tool,
+)
+
+try:
+    from livekit.agents.types import (
+        DEFAULT_API_CONNECT_OPTIONS,
+        NOT_GIVEN,
+        APIConnectOptions,
+        NotGivenOr,
+    )
+except ImportError:
+    from livekit.agents import (  # type: ignore[no-redef,unused-ignore]
+        DEFAULT_API_CONNECT_OPTIONS,
+        NOT_GIVEN,
+        APIConnectOptions,
+        NotGivenOr,
+    )
+
+from .session import SessionStore
+
+logger = logging.getLogger("livekit.plugins.backboard")
+
+_DEFAULT_BASE_URL = "https://app.backboard.io/api"
+
+
+class BackboardLLM(llm.LLM):  # type: ignore[type-arg]
+    """LiveKit Agents LLM plugin that routes inference through Backboard.io.
+
+    Backboard provides persistent memory, RAG, and 1,800+ LLM backends.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str = _DEFAULT_BASE_URL,
+        assistant_id: str = "",
+        user_id: str = "default",
+        llm_provider: str = "openai",
+        model_name: str = "gpt-4o",
+        memory: str | None = "auto",
+        session_store: SessionStore | None = None,
+    ) -> None:
+        super().__init__()
+        self._api_key = api_key or os.environ.get("BACKBOARD_API_KEY", "")
+        if not self._api_key:
+            raise ValueError(
+                "Backboard API key is required. Set BACKBOARD_API_KEY env var "
+                "or pass api_key to BackboardLLM()."
+            )
+
+        self._base_url = base_url
+        self._assistant_id = assistant_id
+        self._user_id = user_id
+        self._llm_provider = llm_provider
+        self._model_name = model_name
+        self._memory = memory
+        self._session_store = session_store or SessionStore(
+            api_key=self._api_key,
+            base_url=self._base_url,
+            assistant_id=self._assistant_id,
+        )
+        self._client: httpx.AsyncClient | None = None
+
+    @property
+    def model(self) -> str:
+        return self._model_name
+
+    @property
+    def provider(self) -> str:
+        return "backboard"
+
+    def set_user_id(self, user_id: str) -> None:
+        self._user_id = user_id
+
+    def set_assistant_id(self, assistant_id: str) -> None:
+        self._assistant_id = assistant_id
+        self._session_store.set_assistant_id(assistant_id)
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(30, connect=5),
+            )
+        return self._client
+
+    def chat(
+        self,
+        *,
+        chat_ctx: ChatContext,
+        tools: list[Tool] | None = None,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+        parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
+        tool_choice: NotGivenOr[llm.ToolChoice] = NOT_GIVEN,
+        extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
+    ) -> BackboardLLMStream:
+        return BackboardLLMStream(
+            llm_instance=self,
+            chat_ctx=chat_ctx,
+            tools=tools or [],
+            conn_options=conn_options,
+            client=self._get_client(),
+            api_key=self._api_key,
+            base_url=self._base_url,
+            user_id=self._user_id,
+            assistant_id=self._assistant_id,
+            llm_provider=self._llm_provider,
+            model_name=self._model_name,
+            memory=self._memory,
+            session_store=self._session_store,
+        )
+
+    async def aclose(self) -> None:
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
+        await self._session_store.aclose()
+
+
+# Public alias matching LiveKit plugin conventions (e.g. openai.LLM)
+LLM = BackboardLLM
+
+
+class BackboardLLMStream(llm.LLMStream):
+    """Streaming response from Backboard API via SSE."""
+
+    def __init__(
+        self,
+        *,
+        llm_instance: BackboardLLM,
+        chat_ctx: ChatContext,
+        tools: list[Tool],
+        conn_options: APIConnectOptions,
+        client: httpx.AsyncClient,
+        api_key: str,
+        base_url: str,
+        user_id: str,
+        assistant_id: str,
+        llm_provider: str,
+        model_name: str,
+        memory: str | None,
+        session_store: SessionStore,
+    ) -> None:
+        super().__init__(llm_instance, chat_ctx=chat_ctx, tools=tools, conn_options=conn_options)
+        self._client = client
+        self._api_key = api_key
+        self._base_url = base_url
+        self._user_id = user_id
+        self._assistant_id = assistant_id
+        self._llm_provider = llm_provider
+        self._model_name = model_name
+        self._memory = memory
+        self._session_store = session_store
+
+    def _extract_user_message(self) -> str:
+        """Extract the latest user message from ChatContext."""
+        for msg in reversed(self._chat_ctx.messages()):
+            if msg.role == "user" and msg.text_content:
+                return msg.text_content
+        for msg in reversed(self._chat_ctx.messages()):
+            if msg.role in ("developer", "system") and msg.text_content:
+                return msg.text_content
+        return ""
+
+    async def _run(self) -> None:
+        """Stream a response from the Backboard API."""
+        user_message = self._extract_user_message()
+        if not user_message:
+            logger.warning("No user message found in ChatContext")
+            self._event_ch.send_nowait(
+                ChatChunk(
+                    id=str(uuid.uuid4()),
+                    delta=ChoiceDelta(
+                        role="assistant",
+                        content="I didn't catch that. Could you please repeat?",
+                    ),
+                )
+            )
+            return
+
+        thread_id = await self._session_store.get_or_create_thread(self._user_id)
+        logger.debug("Streaming from thread %s for user %s", thread_id, self._user_id)
+
+        request_id = str(uuid.uuid4())
+        total_tokens = 0
+
+        data: dict[str, str] = {
+            "content": user_message,
+            "llm_provider": self._llm_provider,
+            "model_name": self._model_name,
+            "stream": "true",
+        }
+        if self._memory:
+            data["memory"] = self._memory
+
+        try:
+            async with self._client.stream(
+                "POST",
+                f"{self._base_url}/threads/{thread_id}/messages",
+                headers={
+                    "X-API-Key": self._api_key,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data=data,
+            ) as response:
+                response.raise_for_status()
+
+                buffer = ""
+                async for chunk in response.aiter_text():
+                    buffer += chunk
+
+                    while "\n\n" in buffer:
+                        event, buffer = buffer.split("\n\n", 1)
+
+                        for line in event.split("\n"):
+                            if not line.startswith("data: "):
+                                continue
+
+                            payload = line[6:]
+                            if payload == "[DONE]":
+                                return
+
+                            try:
+                                parsed = json.loads(payload)
+                            except json.JSONDecodeError:
+                                continue
+
+                            event_type = parsed.get("type")
+
+                            if event_type == "content_streaming":
+                                content = parsed.get("content")
+                                if content:
+                                    total_tokens += 1
+                                    self._event_ch.send_nowait(
+                                        ChatChunk(
+                                            id=request_id,
+                                            delta=ChoiceDelta(
+                                                role="assistant",
+                                                content=content,
+                                            ),
+                                        )
+                                    )
+
+                            elif event_type in ("message_complete", "run_ended"):
+                                usage = CompletionUsage(
+                                    completion_tokens=parsed.get("output_tokens", total_tokens),
+                                    prompt_tokens=parsed.get("input_tokens", 0),
+                                    total_tokens=parsed.get("total_tokens", total_tokens),
+                                )
+                                self._event_ch.send_nowait(ChatChunk(id=request_id, usage=usage))
+                                return
+
+                            elif event_type == "error":
+                                error_msg = parsed.get("error", "Unknown error")
+                                logger.error("Backboard stream error: %s", error_msg)
+                                self._event_ch.send_nowait(
+                                    ChatChunk(
+                                        id=request_id,
+                                        delta=ChoiceDelta(
+                                            role="assistant",
+                                            content=f"Error: {error_msg}",
+                                        ),
+                                    )
+                                )
+                                return
+
+        except httpx.TimeoutException as e:
+            raise APITimeoutError() from e
+        except httpx.HTTPStatusError as e:
+            raise APIStatusError(
+                message=str(e),
+                status_code=e.response.status_code,
+                body=None,
+            ) from e
+        except Exception as e:
+            raise APIConnectionError() from e

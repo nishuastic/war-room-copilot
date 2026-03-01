@@ -17,6 +17,7 @@ flowchart LR
         SR[Skill Router<br/>GPT-4.1-nano]
         CG{Confidence<br/>Gate}
         LLM[GPT-4.1-mini<br/>Incident Reasoning]
+        BBLLM[BackboardLLM<br/>Direct Recall Stream]
         Tools[Tool Registry<br/>26 tools via ALL_TOOLS]
         TTS[Speechmatics TTS]
     end
@@ -63,7 +64,10 @@ flowchart LR
     SR --> CG
     CG -- "< 0.4 discard" --> STM
     CG -- "0.4–0.7 silent" --> BB
+    CG -- "> 0.7 recall" --> BBLLM
     CG -- "> 0.7 speak" --> LLM
+    BBLLM -- "memory + RAG stream" --> BB
+    BBLLM -- response --> TTS
     STM -. "context injected" .-> LLM
     STM -- segment --> DB
     STM -- agent_trace --> DB
@@ -73,8 +77,8 @@ flowchart LR
     DT -- decision --> LTM
     LTM -- store/recall --> BB
     LLM -- "tool call" --> Tools
-    LLM -- "recall_decision" --> DB
-    LLM -- "recall_decision" --> LTM
+    LLM -- "recall_decision<br/>(fallback)" --> DB
+    LLM -- "recall_decision<br/>(fallback)" --> LTM
     Tools -- "PyGitHub (REST)" --> GH
     Tools -- "Datadog SDK" --> DD
     Tools -- "SDK calls" --> Cloud
@@ -110,7 +114,8 @@ Stage 7 combines **intent-based skill routing** and **business metrics**. A fast
 - **Long-term memory** — Backboard.io for persistent cross-session recall with auto memory
 - **Decision tracking** — LLM-based detection of decisions, action items, and agreements (non-blocking, every 5 segments)
 - **SQLite persistence** — local store for call metadata, transcript history, and decisions (`.data/war_room.db`)
-- **Recall tool** — `recall_decision` function tool for querying past decisions across sessions
+- **Recall tool** — `recall_decision` function tool for querying past decisions across sessions (fallback)
+- **BackboardLLM direct recall** — for recall skill, streams through Backboard's LLM plugin (memory + RAG) directly to TTS, avoiding the double-LLM path
 - **Dynamic prompt** with room name, known speakers, and allowed repos injected
 - **Skill routing** — LLM-based intent classification (5 skills) with confidence gating (speak / silent dashboard push / discard)
 - **Multi-LLM ready** — per-skill model config in `config.py` (all default to GPT-4.1-mini, easily swappable)
@@ -131,7 +136,8 @@ Stage 7 combines **intent-based skill routing** and **business metrics**. A fast
 | Cloud Log Tools | `src/war_room_copilot/tools/logs.py` | 7 `@function_tool` functions for AWS/GCP/Azure logs |
 | Service Graph Tools | `src/war_room_copilot/tools/service_graph.py` | 3 `@function_tool` functions for service dependency graph and health |
 | Runbook Tool | `src/war_room_copilot/tools/runbook.py` | `search_runbook` function tool for keyword-matched runbook lookup |
-| Recall Tool | `src/war_room_copilot/tools/recall.py` | `recall_decision` function tool for querying past decisions |
+| Recall Tool | `src/war_room_copilot/tools/recall.py` | `recall_decision` function tool for querying past decisions (fallback) |
+| Backboard LLM Plugin | `src/war_room_copilot/plugins/backboard/` | Vendored LiveKit LLM plugin — streams recall queries directly through Backboard |
 | Investigation Runner | `src/war_room_copilot/skills/investigation.py` | Background OpenAI tool-calling loop using all 26 tools via `ALL_TOOLS` |
 | Short-Term Memory | `src/war_room_copilot/memory/short_term.py` | Sliding window of `TranscriptSegment` objects |
 | Long-Term Memory | `src/war_room_copilot/memory/long_term.py` | Backboard.io wrapper for persistent cross-session memory |
@@ -167,7 +173,8 @@ Stage 7 combines **intent-based skill routing** and **business metrics**. A fast
    - **> 0.7**: apply skill-specific prompt suffix, inject context, let pipeline speak
 8. Dynamic prompt is built with room name, known speaker names, allowed repos, and skill suffix
 9. GPT-4.1-mini reasons about the incident; may call GitHub tools or `recall_decision`
-10. `recall_decision` searches SQLite (local decisions) + Backboard (cross-session memory)
+9b. **Recall skill (direct path):** When the skill router classifies a query as RECALL and BackboardLLM is available, the `llm_node` override routes the query directly through BackboardLLM — one LLM call with built-in memory/RAG, streamed to TTS. Local SQLite decisions are injected as context. Falls back to `recall_decision` tool path on failure.
+10. `recall_decision` (fallback) searches SQLite (local decisions) + Backboard (cross-session memory)
 11. Speechmatics TTS converts response to audio
 12. Audio sent back to LiveKit room
 13. Background task captures speaker voiceprints every 30s for future identification

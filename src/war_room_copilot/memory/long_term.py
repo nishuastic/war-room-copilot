@@ -64,6 +64,16 @@ class LongTermMemory:
         logger.info("Started Backboard thread: %s", self._thread_id)
         return self._thread_id
 
+    @property
+    def thread_id(self) -> str | None:
+        """Expose thread_id so BackboardLLM's SessionStore can share the same thread."""
+        return self._thread_id
+
+    @property
+    def assistant_id(self) -> str | None:
+        """Expose assistant_id for BackboardLLM initialization."""
+        return self._assistant_id
+
     async def store(self, content: str, send_to_llm: bool = False) -> str | None:
         """Store content in Backboard memory.
 
