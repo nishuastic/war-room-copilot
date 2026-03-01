@@ -21,6 +21,8 @@ dependencies = [
     "langchain-openai>=0.3",
     "langchain-anthropic>=0.3",
     "langchain-google-genai>=2.0",
+    "fastapi",
+    "uvicorn[standard]",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,7 @@ all-llm = [
     "livekit-plugins-anthropic",
     "livekit-plugins-google",
 ]
+backboard = ["backboard-sdk"]
 dev = [
     "ruff",
     "mypy",

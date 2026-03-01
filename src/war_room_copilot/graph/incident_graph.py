@@ -20,7 +20,9 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
+from war_room_copilot.graph.nodes.contradict import contradict_node
 from war_room_copilot.graph.nodes.github_research import github_research_node
+from war_room_copilot.graph.nodes.postmortem import postmortem_node
 from war_room_copilot.graph.nodes.recall import recall_node
 from war_room_copilot.graph.nodes.respond import respond_node
 from war_room_copilot.graph.nodes.skill_router import skill_router_node
@@ -38,6 +40,8 @@ def _route_after_router(state: IncidentState) -> str:
         "summarize": "summarize",
         "recall": "recall",
         "respond": "respond",
+        "contradict": "contradict",
+        "postmortem": "postmortem",
     }.get(skill, "respond")
 
 
@@ -54,6 +58,8 @@ def build_incident_graph() -> Any:
     graph.add_node("summarize", summarize_node)
     graph.add_node("recall", recall_node)
     graph.add_node("respond", respond_node)
+    graph.add_node("contradict", contradict_node)
+    graph.add_node("postmortem", postmortem_node)
 
     # Entry point
     graph.set_entry_point("router")
@@ -67,6 +73,8 @@ def build_incident_graph() -> Any:
             "summarize": "summarize",
             "recall": "recall",
             "respond": "respond",
+            "contradict": "contradict",
+            "postmortem": "postmortem",
         },
     )
 
@@ -75,6 +83,8 @@ def build_incident_graph() -> Any:
     graph.add_edge("summarize", END)
     graph.add_edge("recall", END)
     graph.add_edge("respond", END)
+    graph.add_edge("contradict", END)
+    graph.add_edge("postmortem", END)
 
     return graph.compile()
 

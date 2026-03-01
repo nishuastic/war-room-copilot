@@ -31,6 +31,19 @@ async def recall_node(state: IncidentState) -> dict[str, Any]:
     decisions = state.get("decisions", [])
 
     context_parts: list[str] = []
+
+    # Cross-session memory via Backboard (P1-F)
+    try:
+        from war_room_copilot.tools.backboard import recall_memory
+
+        thread_id = state.get("backboard_thread_id")  # type: ignore[typeddict-item]
+        if thread_id:
+            bb_result = await recall_memory(str(thread_id), query)
+            if bb_result:
+                context_parts.append(f"Cross-session memory:\n{bb_result}")
+    except Exception:
+        logger.debug("Backboard recall unavailable")
+
     if decisions:
         context_parts.append("Decisions made:\n" + "\n".join(decisions))
     if findings:

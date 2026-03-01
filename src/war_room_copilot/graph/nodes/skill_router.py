@@ -21,12 +21,21 @@ into exactly ONE of these skills:
 - investigate: User wants to look up code, commits, PRs, issues, or debug info
 - summarize: User wants a summary of the incident so far, or a recap
 - recall: User is asking about a previous decision or earlier discussion point
+- contradict: User asks to check for contradictions or inconsistencies in what was said
+- postmortem: User asks for a post-mortem, incident report, or wrap-up document
 - respond: General conversation, greetings, or questions you can answer directly
 
 Reply with ONLY the skill name, nothing else. For example: investigate"""
 )
 
-VALID_SKILLS = {"investigate", "summarize", "recall", "respond"}
+VALID_SKILLS = {
+    "investigate",
+    "summarize",
+    "recall",
+    "respond",
+    "contradict",
+    "postmortem",
+}
 
 
 async def skill_router_node(state: IncidentState) -> dict[str, Any]:

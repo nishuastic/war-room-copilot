@@ -4,14 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 from livekit import agents
-from livekit.agents import Agent, AgentSession, RoomInputOptions, RunContext, function_tool
+from livekit.agents import (
+    Agent,
+    AgentSession,
+    RoomInputOptions,
+    RunContext,
+    function_tool,
+)
 from livekit.plugins import elevenlabs, silero, speechmatics  # noqa: F401
 from livekit.plugins.speechmatics import SpeakerIdentifier, TurnDetectionMode
 
+from war_room_copilot.config import get_settings
 from war_room_copilot.graph.incident_graph import incident_graph
 from war_room_copilot.graph.nodes.github_research import close_mcp_client
 from war_room_copilot.llm import create_llm
@@ -24,11 +32,40 @@ from war_room_copilot.platforms.base import (
 
 logger = logging.getLogger("war-room-copilot.platforms.livekit")
 
+# SRE/incident vocabulary for Speechmatics custom dictionary.
+# Improves recognition of domain-specific terms that general STT misrecognizes.
+INCIDENT_VOCAB = [
+    {"content": "Kubernetes"},
+    {"content": "kubectl", "sounds_like": ["kube-control", "kube-cuddle"]},
+    {"content": "MTTR", "sounds_like": ["M T T R", "mean time to recovery"]},
+    {"content": "MTTD", "sounds_like": ["M T T D", "mean time to detect"]},
+    {"content": "PagerDuty"},
+    {"content": "Datadog"},
+    {"content": "Speechmatics"},
+    {"content": "LangGraph"},
+    {"content": "LiveKit"},
+    {"content": "OpenTelemetry", "sounds_like": ["open telemetry"]},
+    {"content": "Prometheus"},
+    {"content": "Grafana"},
+    {"content": "SLO", "sounds_like": ["S L O", "service level objective"]},
+    {"content": "SLA", "sounds_like": ["S L A", "service level agreement"]},
+    {"content": "RCA", "sounds_like": ["R C A", "root cause analysis"]},
+    {"content": "postmortem"},
+    {"content": "runbook"},
+    {"content": "rollback"},
+    {"content": "hotfix"},
+    {"content": "canary deployment"},
+    {"content": "war room"},
+    {"content": "p zero", "sounds_like": ["P0", "priority zero"]},
+    {"content": "p one", "sounds_like": ["P1", "priority one"]},
+]
+
 # Persistent state shared across graph invocations within a session.
 # This accumulates transcript, findings, and decisions over the lifetime
 # of the agent — giving the graph memory across multiple tool calls.
 _session_state: dict[str, Any] = {
     "transcript": [],
+    "transcript_structured": [],
     "findings": [],
     "decisions": [],
     "speakers": {},
@@ -113,11 +150,17 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
     for s in known_speakers:
         _session_state["speakers"][s.label] = s.label
 
+    cfg = get_settings()
     stt = speechmatics.STT(
+        operating_point=cfg.speechmatics_operating_point,
         turn_detection_mode=TurnDetectionMode.SMART_TURN,
         enable_diarization=True,
+        max_speakers=cfg.speechmatics_max_speakers,
+        speaker_sensitivity=cfg.speechmatics_speaker_sensitivity,
+        additional_vocab=INCIDENT_VOCAB,
+        enable_entities=cfg.speechmatics_enable_entities,
         speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
-        speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
+        speaker_passive_format=("<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>"),
         focus_speakers=["S1"],
         known_speakers=lk_speakers,
     )
@@ -135,7 +178,7 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
         room_input_options=RoomInputOptions(),
     )
 
-    # --- P0-B: Feed STT transcript into session state ---
+    # --- P0-B + P1-B: Feed STT transcript into session state ---
     @session.on("user_input_transcribed")
     def _on_transcript(event: Any) -> None:
         if not getattr(event, "is_final", False):
@@ -144,11 +187,19 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
         if not text:
             return
         speaker = getattr(event, "speaker_id", None) or "Unknown"
-        # Map raw speaker ID to known name if available
         display_name = _session_state["speakers"].get(speaker, speaker)
         ts = datetime.now(tz=timezone.utc).strftime("%H:%M:%S")
         line = f"[{ts}] {display_name}: {text}"
         _session_state["transcript"].append(line)
+        # Structured entry for timeline generation (P1-B)
+        _session_state["transcript_structured"].append(
+            {
+                "speaker": display_name,
+                "text": text,
+                "timestamp": ts,
+                "epoch": time.time(),
+            }
+        )
         logger.debug("Transcript: %s", line)
 
     if known_speakers:
@@ -176,7 +227,111 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
                 pass
             await asyncio.sleep(30)
 
+    # --- P1-A: Background contradiction monitoring ---
+    async def monitor_contradictions() -> None:
+        """Periodically check transcript for contradictions."""
+        from war_room_copilot.graph.nodes.contradict import (
+            run_contradiction_check,
+        )
+
+        await asyncio.sleep(30)  # wait for transcript to accumulate
+        while True:
+            transcript = _session_state.get("transcript", [])
+            if len(transcript) >= 5:
+                try:
+                    result = await run_contradiction_check(transcript[-30:])
+                    if result and result.get("found") and result.get("confidence", 0) > 0.7:
+                        summary = result.get("summary", "Contradiction detected.")
+                        await session.generate_reply(
+                            instructions=("Politely interject with this observation: " + summary)
+                        )
+                except Exception:
+                    logger.exception("Contradiction check failed")
+            await asyncio.sleep(20)
+
+    # --- P1-C: Background decision capture ---
+    async def monitor_decisions() -> None:
+        """Periodically check transcript for decisions."""
+        from war_room_copilot.graph.nodes.capture_decision import (
+            run_decision_check,
+        )
+
+        await asyncio.sleep(15)  # wait for some conversation
+        last_checked = 0
+        while True:
+            transcript = _session_state.get("transcript", [])
+            new_lines = transcript[last_checked:]
+            if len(new_lines) >= 2:
+                try:
+                    result = await run_decision_check(new_lines[-5:])
+                    if result and result.get("found"):
+                        decision = result["decision"]
+                        speaker = result.get("speaker", "Someone")
+                        ts = datetime.now(tz=timezone.utc).strftime("%H:%M:%S")
+                        entry = f"[{ts}] {speaker}: {decision}"
+                        _session_state["decisions"].append(entry)
+                        await session.generate_reply(
+                            instructions=(
+                                "Briefly confirm you logged this "
+                                "decision: " + decision + ". Ask if that is correct."
+                            )
+                        )
+                except Exception:
+                    logger.exception("Decision check failed")
+                last_checked = len(transcript)
+            await asyncio.sleep(25)
+
+    # --- P1-F: Backboard.io cross-session memory ---
+    backboard_thread_id: str | None = None
+    try:
+        from war_room_copilot.tools.backboard import (
+            create_incident_thread,
+            store_memory,
+        )
+
+        backboard_thread_id = await create_incident_thread(ctx.room.name)
+        logger.info("Backboard thread: %s", backboard_thread_id)
+    except Exception:
+        logger.warning("Backboard unavailable, running without cross-session memory")
+
+    async def sync_to_backboard() -> None:
+        """Periodically flush findings/decisions to Backboard."""
+        if not backboard_thread_id:
+            return
+        last_synced_d = 0
+        last_synced_f = 0
+        while True:
+            await asyncio.sleep(60)
+            decisions = _session_state.get("decisions", [])
+            findings = _session_state.get("findings", [])
+            new_decisions = decisions[last_synced_d:]
+            new_findings = findings[last_synced_f:]
+            for item in new_decisions + new_findings:
+                try:
+                    await store_memory(backboard_thread_id, item)
+                except Exception:
+                    logger.exception("Failed to sync to Backboard")
+            last_synced_d = len(decisions)
+            last_synced_f = len(findings)
+
+    # --- P1-G: Dashboard API server ---
+    async def start_dashboard_api() -> None:
+        """Start the FastAPI SSE server as a background task."""
+        import uvicorn  # type: ignore[import-untyped]
+
+        from war_room_copilot.api.main import app as api_app
+        from war_room_copilot.api.main import set_state_ref
+
+        set_state_ref(_session_state)
+        config = uvicorn.Config(api_app, host="0.0.0.0", port=8000, log_level="warning")
+        server = uvicorn.Server(config)
+        await server.serve()
+
     asyncio.create_task(capture_voiceprints())
+    asyncio.create_task(monitor_contradictions())
+    asyncio.create_task(monitor_decisions())
+    asyncio.create_task(sync_to_backboard())
+    asyncio.create_task(start_dashboard_api())
 
 
 class LiveKitPlatform:

@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     zoom_client_id: str = Field(default="")
     zoom_client_secret: str = Field(default="")
 
+    # Speechmatics tuning
+    speechmatics_operating_point: str = Field(default="enhanced")
+    speechmatics_max_speakers: int = Field(default=10)
+    speechmatics_speaker_sensitivity: float = Field(default=0.5)
+    speechmatics_enable_entities: bool = Field(default=True)
+
     # Default repo for get_repo_context()
     default_repo_owner: str = Field(default="")
     default_repo_name: str = Field(default="")

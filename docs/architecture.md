@@ -75,13 +75,17 @@ The two loops compose — they don't compete. The voice LLM decides *when* to in
 flowchart TD
     START((START)) --> Router[Skill Router\nclassify intent]
     Router -->|investigate| Investigate[GitHub Research\nsearch code + issues]
-    Router -->|summarize| Summarize[Summarize\nincident recap]
-    Router -->|recall| Recall[Recall\nmemory search]
+    Router -->|summarize| Summarize[Summarize / Timeline\nincident recap]
+    Router -->|recall| Recall[Recall\nmemory search + Backboard]
     Router -->|respond| Respond[Respond\ngeneral conversation]
+    Router -->|contradict| Contradict[Contradict\ndetect inconsistencies]
+    Router -->|postmortem| Postmortem[Post-mortem\nincident report]
     Investigate --> END((END))
     Summarize --> END
     Recall --> END
     Respond --> END
+    Contradict --> END
+    Postmortem --> END
 ```
 
 ### Shared State (IncidentState)
@@ -104,11 +108,14 @@ State accumulates across graph invocations via `_session_state` in `livekit.py`,
 
 | Node | File | What it does |
 |------|------|-------------|
-| Skill Router | `graph/nodes/skill_router.py` | LLM-based intent classification → one of: investigate, summarize, recall, respond |
+| Skill Router | `graph/nodes/skill_router.py` | LLM-based intent classification → one of: investigate, summarize, recall, respond, contradict, postmortem |
 | GitHub Research | `graph/nodes/github_research.py` | Wraps `GitHubMCPClient` — searches code and issues, appends to findings |
-| Summarize | `graph/nodes/summarize.py` | Generates concise incident summary from transcript + findings + decisions |
-| Recall | `graph/nodes/recall.py` | Searches accumulated state for past decisions and discussion points |
+| Summarize | `graph/nodes/summarize.py` | Generates concise incident summary or chronological timeline from transcript + findings + decisions |
+| Recall | `graph/nodes/recall.py` | Searches accumulated state and Backboard cross-session memory for past decisions and discussion points |
 | Respond | `graph/nodes/respond.py` | General conversation with incident context |
+| Contradict | `graph/nodes/contradict.py` | Detects factual contradictions, timeline inconsistencies, and circular reasoning in transcript |
+| Capture Decision | `graph/nodes/capture_decision.py` | Detects decisions (actions, conclusions, assignments) in transcript utterances |
+| Post-mortem | `graph/nodes/postmortem.py` | Generates structured post-mortem report (summary, impact, timeline, root cause, action items) |
 
 ### LLM Separation
 
@@ -121,24 +128,33 @@ The system uses two separate LLM instances:
 
 Both read from the same `LLM_PROVIDER` / `LLM_MODEL` config. The separation exists because LiveKit and LangGraph expect different LLM interfaces.
 
-## Current Stage: 0 + Tools + LangGraph
+## Current Stage: 0 + Tools + LangGraph + P1 Features
 
-The agent joins a LiveKit room, detects voice activity via Silero VAD, transcribes speech via Speechmatics (with diarization and speaker identification), passes it through a configurable LLM, and speaks back via ElevenLabs TTS.
+The agent joins a LiveKit room, detects voice activity via Silero VAD, transcribes speech via Speechmatics (enhanced mode with custom SRE vocabulary, entity detection, and speaker identification), passes it through a configurable LLM, and speaks back via ElevenLabs TTS.
 
-The **LangGraph reasoning layer** provides skill-based routing, GitHub research, incident summarization, memory recall, and general conversation — all backed by persistent session state.
+The **LangGraph reasoning layer** provides skill-based routing, GitHub research, incident summarization, timeline generation, contradiction detection, post-mortem generation, memory recall (with Backboard cross-session memory), and general conversation — all backed by persistent session state.
 
 The **tools layer** provides agentic access to GitHub repos via the official GitHub MCP server running in Docker.
+
+The **dashboard API** (FastAPI SSE) streams live transcript, findings, and decisions to a web frontend.
 
 ### Features
 - Speaker diarization (who said what)
 - Speaker identification (recognizes returning speakers via voiceprints saved to `speakers.json`)
 - Smart turn detection (knows when someone is done speaking)
 - Personalized greetings for known speakers
+- Enhanced Speechmatics STT with custom SRE vocabulary (25 domain terms) and entity detection
 - GitHub integration: issues, PRs, commits, code search (51 tools via MCP)
-- Skill-based routing (investigate, summarize, recall, respond)
+- Skill-based routing (investigate, summarize, recall, respond, contradict, postmortem)
 - Session memory (findings, decisions, transcript accumulate across interactions)
 - **Voice-to-graph bridge**: Voice LLM invokes LangGraph via `reason` function tool for deep reasoning
 - **Live transcript capture**: STT events feed timestamped, speaker-tagged lines into session state
+- **Contradiction detection**: Background task monitors transcript every 20s for inconsistencies and auto-interjects
+- **Decision capture**: Background task detects decisions and confirms them aloud
+- **Timeline generation**: Chronological incident timeline from timestamped transcript
+- **Post-mortem drafting**: Structured incident report saved to file
+- **Cross-session memory**: Backboard.io integration for recall across incidents
+- **Dashboard API**: FastAPI SSE endpoint at :8000 for real-time UI streaming
 
 ### Components
 
@@ -160,8 +176,13 @@ The **tools layer** provides agentic access to GitHub repos via the official Git
 | **Summarize** | `src/war_room_copilot/graph/nodes/summarize.py` | **Incident summary from accumulated state** |
 | **Recall** | `src/war_room_copilot/graph/nodes/recall.py` | **Memory search for past decisions** |
 | **Respond** | `src/war_room_copilot/graph/nodes/respond.py` | **General conversation with context** |
+| **Contradict** | `src/war_room_copilot/graph/nodes/contradict.py` | **Contradiction detection in transcript** |
+| **Capture Decision** | `src/war_room_copilot/graph/nodes/capture_decision.py` | **Decision detection in transcript** |
+| **Post-mortem** | `src/war_room_copilot/graph/nodes/postmortem.py` | **Structured incident report generation** |
 | GitHub MCP Client | `src/war_room_copilot/tools/github_mcp.py` | Async MCP client — Docker lifecycle, tool invocation, schema conversion |
 | GitHub Facade | `src/war_room_copilot/tools/github.py` | `get_repo_context()` — parallel fetch of issues, PRs, commits |
+| Backboard Client | `src/war_room_copilot/tools/backboard.py` | Cross-session memory via Backboard.io |
+| Dashboard API | `src/war_room_copilot/api/main.py` | FastAPI SSE endpoint for real-time dashboard |
 
 ### GitHub MCP Integration
 
@@ -203,13 +224,25 @@ sequenceDiagram
 
 1. User speaks into LiveKit room
 2. Silero VAD detects voice activity
-3. Speechmatics transcribes audio to text with speaker labels
-4. Voice LLM generates response (can invoke reasoning graph via `_invoke_graph()`)
-5. Reasoning graph: router classifies intent → dispatches to skill node → returns result
-6. Skill nodes accumulate findings/decisions into persistent `IncidentState`
-7. ElevenLabs TTS converts response to audio
-8. Audio sent back to LiveKit room
-9. Background task captures speaker voiceprints every 30s for future identification
+3. Speechmatics transcribes audio to text with speaker labels (enhanced mode + custom SRE vocab)
+4. Transcript handler appends timestamped, speaker-tagged lines to `_session_state`
+5. Voice LLM generates response (can invoke reasoning graph via `_invoke_graph()`)
+6. Reasoning graph: router classifies intent → dispatches to skill node → returns result
+7. Skill nodes accumulate findings/decisions into persistent `IncidentState`
+8. ElevenLabs TTS converts response to audio
+9. Audio sent back to LiveKit room
+
+### Background Tasks
+
+Five async tasks run in parallel with the voice loop:
+
+| Task | Interval | Purpose |
+|------|----------|---------|
+| `capture_voiceprints` | 30s | Saves speaker voiceprints for identification |
+| `monitor_contradictions` | 20s | Checks transcript for inconsistencies, auto-interjects if confidence > 0.7 |
+| `monitor_decisions` | 25s | Detects decisions, appends to state, confirms aloud |
+| `sync_to_backboard` | 60s | Flushes findings/decisions to Backboard cross-session memory |
+| `start_dashboard_api` | once | Starts FastAPI SSE server on port 8000 |
 
 ## Tech Decisions
 
