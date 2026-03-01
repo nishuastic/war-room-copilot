@@ -36,6 +36,34 @@ class GitHubRateLimitError(WarRoomToolError):
     """GitHub API rate limit reached."""
 
 
+class LLMError(Exception):
+    """Base for all LLM-related errors."""
+
+
+class LLMTimeoutError(LLMError):
+    """LLM API call timed out."""
+
+
+class LLMAuthError(LLMError):
+    """LLM API authentication failed (invalid or missing key)."""
+
+
+class LLMRateLimitError(LLMError):
+    """LLM API rate limit reached."""
+
+
+class BackboardError(Exception):
+    """Base for all Backboard API errors."""
+
+
+class BackboardConnectionError(BackboardError):
+    """Backboard API unreachable or network error."""
+
+
+class BackboardAuthError(BackboardError):
+    """Backboard API authentication failed."""
+
+
 # ── Schema conversion ──────────────────────────────────────────────────────────
 
 

@@ -12,12 +12,13 @@ from war_room_copilot.tools.backboard import (
     recall_memory,
     store_memory,
 )
+from war_room_copilot.tools.github_mcp import BackboardAuthError
 
 # ── get_backboard_client ──────────────────────────────────────────────────────
 
 
 async def test_get_backboard_client_no_api_key() -> None:
-    """Missing BACKBOARD_API_KEY raises RuntimeError."""
+    """Missing BACKBOARD_API_KEY raises BackboardAuthError."""
     mock_settings = MagicMock()
     mock_settings.backboard_api_key = ""
 
@@ -27,7 +28,7 @@ async def test_get_backboard_client_no_api_key() -> None:
         patch("war_room_copilot.tools.backboard.get_settings", return_value=mock_settings),
         patch.dict("sys.modules", {"backboard": mock_bb}),
     ):
-        with pytest.raises(RuntimeError, match="BACKBOARD_API_KEY not set"):
+        with pytest.raises(BackboardAuthError, match="BACKBOARD_API_KEY not set"):
             await get_backboard_client()
 
 

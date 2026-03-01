@@ -56,27 +56,42 @@ async def events() -> StreamingResponse:
         yield "retry: 3000\n\n"
 
         while True:
-            transcript = _state_ref.get("transcript", [])
-            findings = _state_ref.get("findings", [])
-            decisions = _state_ref.get("decisions", [])
+            try:
+                transcript = _state_ref.get("transcript", [])
+                findings = _state_ref.get("findings", [])
+                decisions = _state_ref.get("decisions", [])
 
-            for line in transcript[last_transcript:]:
-                event_id += 1
-                payload = json.dumps({"type": "transcript", "data": line})
-                yield f"id: {event_id}\ndata: {payload}\n\n"
-            last_transcript = len(transcript)
+                for line in transcript[last_transcript:]:
+                    event_id += 1
+                    payload = json.dumps({"type": "transcript", "data": line})
+                    yield f"id: {event_id}\ndata: {payload}\n\n"
+                last_transcript = len(transcript)
 
-            for finding in findings[last_findings:]:
-                event_id += 1
-                payload = json.dumps({"type": "finding", "data": finding})
-                yield f"id: {event_id}\ndata: {payload}\n\n"
-            last_findings = len(findings)
+                for finding in findings[last_findings:]:
+                    event_id += 1
+                    payload = json.dumps({"type": "finding", "data": finding})
+                    yield f"id: {event_id}\ndata: {payload}\n\n"
+                last_findings = len(findings)
 
-            for decision in decisions[last_decisions:]:
+                for decision in decisions[last_decisions:]:
+                    event_id += 1
+                    payload = json.dumps({"type": "decision", "data": decision})
+                    yield f"id: {event_id}\ndata: {payload}\n\n"
+                last_decisions = len(decisions)
+            except Exception as exc:
+                logger.error(
+                    "SSE stream error (%s): %s",
+                    type(exc).__name__,
+                    exc,
+                )
+                err_payload = json.dumps(
+                    {
+                        "type": "error",
+                        "data": f"{type(exc).__name__}: {exc}",
+                    }
+                )
                 event_id += 1
-                payload = json.dumps({"type": "decision", "data": decision})
-                yield f"id: {event_id}\ndata: {payload}\n\n"
-            last_decisions = len(decisions)
+                yield f"id: {event_id}\ndata: {err_payload}\n\n"
 
             await asyncio.sleep(1)
 

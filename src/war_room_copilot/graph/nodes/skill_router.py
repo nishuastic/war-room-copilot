@@ -7,7 +7,7 @@ from typing import Any
 
 from langchain_core.messages import SystemMessage
 
-from war_room_copilot.graph.llm import get_graph_llm
+from war_room_copilot.graph.llm import classify_llm_error, get_graph_llm
 from war_room_copilot.graph.state import IncidentState
 
 logger = logging.getLogger("war-room-copilot.graph.nodes.skill_router")
@@ -53,8 +53,9 @@ async def skill_router_node(state: IncidentState) -> dict[str, Any]:
         if skill not in VALID_SKILLS:
             logger.warning("Router returned unknown skill %r, defaulting to respond", skill)
             skill = "respond"
-    except Exception:
-        logger.exception("Skill routing failed, defaulting to respond")
+    except Exception as exc:
+        llm_err = classify_llm_error(exc)
+        logger.error("Skill routing failed (%s): %s", type(llm_err).__name__, llm_err)
         skill = "respond"
 
     logger.info("Routed query to skill: %s", skill)

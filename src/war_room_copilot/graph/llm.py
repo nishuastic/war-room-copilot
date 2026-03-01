@@ -7,8 +7,42 @@ from functools import lru_cache
 from typing import Any
 
 from war_room_copilot.config import get_settings
+from war_room_copilot.tools.github_mcp import (
+    LLMAuthError,
+    LLMError,
+    LLMRateLimitError,
+    LLMTimeoutError,
+)
 
 logger = logging.getLogger("war-room-copilot.graph.llm")
+
+
+def classify_llm_error(exc: Exception) -> LLMError:
+    """Classify a raw LLM exception into a specific LLMError subtype.
+
+    Inspects the exception message and type to determine if it's a timeout,
+    auth failure, or rate limit — then wraps it in the appropriate error class
+    so callers get a clear indication of what went wrong.
+    """
+    msg = str(exc).lower()
+    exc_type = type(exc).__name__.lower()
+
+    # Timeout detection
+    if "timeout" in msg or "timed out" in msg or "timeouterror" in exc_type:
+        return LLMTimeoutError(f"LLM request timed out: {exc}")
+
+    # Auth / key errors
+    if any(
+        kw in msg for kw in ("authentication", "unauthorized", "401", "invalid api key", "api key")
+    ):
+        return LLMAuthError(f"LLM authentication failed — check your API key: {exc}")
+
+    # Rate limit detection
+    if any(kw in msg for kw in ("rate limit", "429", "too many requests", "quota")):
+        return LLMRateLimitError(f"LLM rate limit hit — wait and retry: {exc}")
+
+    # Generic LLM error with the original message preserved
+    return LLMError(f"LLM call failed: {exc}")
 
 
 @lru_cache(maxsize=1)
@@ -35,14 +69,22 @@ def get_graph_llm() -> Any:
 
         model = model or "claude-sonnet-4-20250514"
         logger.info("Graph LLM: Anthropic %s", model)
-        return ChatAnthropic(model=model, temperature=0)  # type: ignore[call-arg]
+        return ChatAnthropic(  # type: ignore[call-arg]
+            model=model,
+            temperature=0,
+        )
 
     if provider == "google":
-        from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore[import-untyped]
+        from langchain_google_genai import (  # type: ignore[import-untyped]
+            ChatGoogleGenerativeAI,
+        )
 
         model = model or "gemini-2.0-flash"
         logger.info("Graph LLM: Google %s", model)
-        return ChatGoogleGenerativeAI(model=model, temperature=0)  # type: ignore[call-arg]
+        return ChatGoogleGenerativeAI(  # type: ignore[call-arg]
+            model=model,
+            temperature=0,
+        )
 
     raise ValueError(
         f"Unsupported graph LLM provider: {provider!r}. "

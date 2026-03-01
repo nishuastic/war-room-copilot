@@ -7,8 +7,9 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from war_room_copilot.graph.llm import get_graph_llm
+from war_room_copilot.graph.llm import classify_llm_error, get_graph_llm
 from war_room_copilot.graph.state import IncidentState
+from war_room_copilot.tools.github_mcp import LLMRateLimitError, LLMTimeoutError
 
 logger = logging.getLogger("war-room-copilot.graph.nodes.recall")
 
@@ -41,8 +42,8 @@ async def recall_node(state: IncidentState) -> dict[str, Any]:
             bb_result = await recall_memory(str(thread_id), query)
             if bb_result:
                 context_parts.append(f"Cross-session memory:\n{bb_result}")
-    except Exception:
-        logger.debug("Backboard recall unavailable")
+    except Exception as exc:
+        logger.warning("Backboard recall unavailable (%s): %s", type(exc).__name__, exc)
 
     if decisions:
         context_parts.append("Decisions made:\n" + "\n".join(decisions))
@@ -69,9 +70,15 @@ async def recall_node(state: IncidentState) -> dict[str, Any]:
     try:
         response = await llm.ainvoke(messages)
         result = str(response.content)
-    except Exception:
-        logger.exception("Recall failed")
-        result = "Unable to search memory at this time."
+    except Exception as exc:
+        llm_err = classify_llm_error(exc)
+        logger.error("Recall failed (%s): %s", type(llm_err).__name__, llm_err)
+        if isinstance(llm_err, LLMRateLimitError):
+            result = "Unable to search memory — LLM rate limit reached. Try again shortly."
+        elif isinstance(llm_err, LLMTimeoutError):
+            result = "Unable to search memory — LLM request timed out."
+        else:
+            result = f"Unable to search memory — {type(llm_err).__name__}: {llm_err}"
 
     return {
         "findings": [result],

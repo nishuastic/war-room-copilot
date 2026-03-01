@@ -8,7 +8,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from war_room_copilot.graph.llm import get_graph_llm
+from war_room_copilot.graph.llm import classify_llm_error, get_graph_llm
 
 logger = logging.getLogger("war-room-copilot.graph.nodes.capture_decision")
 
@@ -55,6 +55,14 @@ async def run_decision_check(
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         return json.loads(text)  # type: ignore[no-any-return]
-    except (json.JSONDecodeError, Exception):
-        logger.exception("Decision check failed")
+    except json.JSONDecodeError:
+        logger.warning("Decision check returned invalid JSON")
+        return None
+    except Exception as exc:
+        llm_err = classify_llm_error(exc)
+        logger.error(
+            "Decision check failed (%s): %s",
+            type(llm_err).__name__,
+            llm_err,
+        )
         return None

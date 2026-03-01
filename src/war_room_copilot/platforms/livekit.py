@@ -163,13 +163,27 @@ async def reason_tool(ctx: RunContext, query: str) -> str:  # type: ignore[type-
         )
         logger.info("reason_tool result: %s", result[:200] if result else "empty")
         return result
-    except Exception:
-        import traceback
+    except Exception as exc:
+        from war_room_copilot.graph.llm import classify_llm_error
+        from war_room_copilot.tools.github_mcp import (
+            LLMError,
+            WarRoomToolError,
+        )
 
-        tb = traceback.format_exc()
-        print(f"[REASON_TOOL] FAILED: {tb}", file=sys.stderr, flush=True)
-        logger.exception("reason_tool failed")
-        return "Sorry, I encountered an error while processing your request."
+        if isinstance(exc, WarRoomToolError):
+            err_detail = f"{type(exc).__name__}: {exc}"
+        elif isinstance(exc, LLMError):
+            err_detail = f"{type(exc).__name__}: {exc}"
+        else:
+            llm_err = classify_llm_error(exc)
+            err_detail = f"{type(llm_err).__name__}: {llm_err}"
+        print(
+            f"[REASON_TOOL] FAILED ({err_detail})",
+            file=sys.stderr,
+            flush=True,
+        )
+        logger.error("reason_tool failed (%s)", err_detail)
+        return f"Sorry, I encountered an error: {err_detail}"
 
 
 async def _entrypoint(ctx: agents.JobContext) -> None:
@@ -286,8 +300,12 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
                 result = await stt.get_speaker_ids()
                 if result:
                     save_speakers(result)
-            except Exception:
-                logger.exception("Voiceprint capture failed")
+            except Exception as exc:
+                logger.error(
+                    "Voiceprint capture failed (%s): %s",
+                    type(exc).__name__,
+                    exc,
+                )
             await asyncio.sleep(30)
 
     # --- Background contradiction monitoring ---
@@ -309,8 +327,12 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
                         await session.generate_reply(
                             instructions=("Politely interject with this observation: " + summary)
                         )
-                except Exception:
-                    logger.exception("Contradiction check failed")
+                except Exception as exc:
+                    logger.error(
+                        "Contradiction monitor failed (%s): %s",
+                        type(exc).__name__,
+                        exc,
+                    )
             await asyncio.sleep(20)
 
     # --- Background decision capture ---
@@ -345,8 +367,12 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
                                 "decision: " + decision + ". Ask if that is correct."
                             )
                         )
-                except Exception:
-                    logger.exception("Decision check failed")
+                except Exception as exc:
+                    logger.error(
+                        "Decision monitor failed (%s): %s",
+                        type(exc).__name__,
+                        exc,
+                    )
                 last_checked = len(transcript)
             await asyncio.sleep(25)
 
@@ -364,8 +390,14 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
         logger.info("Backboard thread: %s", backboard_thread_id)
         # Inject thread ID into session state so recall_node can find it
         _session_state["backboard_thread_id"] = backboard_thread_id
-    except Exception:
-        logger.warning("Backboard unavailable, running without cross-session memory")
+    except asyncio.TimeoutError:
+        logger.warning("Backboard timed out after 10s — running without cross-session memory")
+    except Exception as exc:
+        logger.warning(
+            "Backboard unavailable (%s): %s — running without cross-session memory",
+            type(exc).__name__,
+            exc,
+        )
 
     async def sync_to_backboard() -> None:
         """Periodically flush findings/decisions to Backboard."""
@@ -383,8 +415,12 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
             for item in new_decisions + new_findings:
                 try:
                     await store_memory(backboard_thread_id, item)
-                except Exception:
-                    logger.exception("Failed to sync to Backboard")
+                except Exception as exc:
+                    logger.error(
+                        "Failed to sync to Backboard (%s): %s",
+                        type(exc).__name__,
+                        exc,
+                    )
             last_synced_d = len(decisions)
             last_synced_f = len(findings)
 
@@ -397,9 +433,27 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
         from war_room_copilot.api.main import set_state_ref
 
         set_state_ref(_session_state)
-        config = uvicorn.Config(api_app, host="0.0.0.0", port=8000, log_level="warning")
+        config = uvicorn.Config(
+            api_app,
+            host="0.0.0.0",
+            port=8000,
+            log_level="warning",
+        )
         server = uvicorn.Server(config)
-        await server.serve()
+        try:
+            await server.serve()
+        except OSError as exc:
+            logger.error(
+                "Dashboard API failed to start (%s): %s — port 8000 may be in use",
+                type(exc).__name__,
+                exc,
+            )
+        except Exception as exc:
+            logger.error(
+                "Dashboard API crashed (%s): %s",
+                type(exc).__name__,
+                exc,
+            )
 
     _launch_task(capture_voiceprints(), name="capture_voiceprints")
     _launch_task(monitor_contradictions(), name="monitor_contradictions")

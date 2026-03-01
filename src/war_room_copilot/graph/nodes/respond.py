@@ -7,8 +7,9 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from war_room_copilot.graph.llm import get_graph_llm
+from war_room_copilot.graph.llm import classify_llm_error, get_graph_llm
 from war_room_copilot.graph.state import IncidentState
+from war_room_copilot.tools.github_mcp import LLMRateLimitError, LLMTimeoutError
 
 logger = logging.getLogger("war-room-copilot.graph.nodes.respond")
 
@@ -46,8 +47,18 @@ async def respond_node(state: IncidentState) -> dict[str, Any]:
     try:
         response = await llm.ainvoke(messages)
         result = str(response.content)
-    except Exception:
-        logger.exception("Response generation failed")
-        result = "I'm having trouble responding right now."
+    except Exception as exc:
+        llm_err = classify_llm_error(exc)
+        logger.error(
+            "Response generation failed (%s): %s",
+            type(llm_err).__name__,
+            llm_err,
+        )
+        if isinstance(llm_err, LLMRateLimitError):
+            result = "I'm hitting the LLM rate limit. Please wait a moment and try again."
+        elif isinstance(llm_err, LLMTimeoutError):
+            result = "The LLM request timed out. Please try again."
+        else:
+            result = f"I'm having trouble responding — {llm_err}"
 
     return {"messages": [AIMessage(content=result)]}

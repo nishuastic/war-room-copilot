@@ -10,8 +10,9 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from war_room_copilot.graph.llm import get_graph_llm
+from war_room_copilot.graph.llm import classify_llm_error, get_graph_llm
 from war_room_copilot.graph.state import IncidentState
+from war_room_copilot.tools.github_mcp import LLMRateLimitError, LLMTimeoutError
 
 logger = logging.getLogger("war-room-copilot.graph.nodes.postmortem")
 
@@ -78,9 +79,19 @@ async def postmortem_node(state: IncidentState) -> dict[str, Any]:
     try:
         response = await llm.ainvoke(messages)
         postmortem_text = str(response.content)
-    except Exception:
-        logger.exception("Post-mortem generation failed")
-        msg = "Unable to generate post-mortem at this time."
+    except Exception as exc:
+        llm_err = classify_llm_error(exc)
+        logger.error(
+            "Post-mortem generation failed (%s): %s",
+            type(llm_err).__name__,
+            llm_err,
+        )
+        if isinstance(llm_err, LLMRateLimitError):
+            msg = "Unable to generate post-mortem — LLM rate limit reached."
+        elif isinstance(llm_err, LLMTimeoutError):
+            msg = "Unable to generate post-mortem — LLM request timed out."
+        else:
+            msg = f"Unable to generate post-mortem — {llm_err}"
         return {"messages": [AIMessage(content=msg)]}
 
     # Save full post-mortem to a dedicated directory
@@ -91,8 +102,12 @@ async def postmortem_node(state: IncidentState) -> dict[str, Any]:
         filepath = POSTMORTEM_DIR / filename
         filepath.write_text(postmortem_text, encoding="utf-8")
         logger.info("Post-mortem saved to %s", filepath)
-    except Exception:
-        logger.exception("Failed to save post-mortem file")
+    except OSError as exc:
+        logger.error(
+            "Failed to save post-mortem file (%s): %s",
+            type(exc).__name__,
+            exc,
+        )
         filepath = Path(filename)
 
     # Speak a brief summary, store the full text as a finding

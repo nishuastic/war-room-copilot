@@ -77,7 +77,11 @@ def _parse_commits(raw: Any) -> list[GitHubCommit]:
 
 def _parse_list(raw: Any, factory: Any) -> list[Any]:
     if isinstance(raw, BaseException):
-        logger.warning("Tool call failed, returning empty list: %s", raw)
+        logger.warning(
+            "GitHub API call failed (%s): %s — returning empty list",
+            type(raw).__name__,
+            raw,
+        )
         return []
     try:
         if raw and isinstance(raw, list):
@@ -88,8 +92,19 @@ def _parse_list(raw: Any, factory: Any) -> list[Any]:
         if not isinstance(data, list):
             data = [data]
         return [factory(item) for item in data if isinstance(item, dict)]
-    except Exception:
-        logger.exception("Failed to parse tool response")
+    except json.JSONDecodeError as exc:
+        logger.warning(
+            "Failed to parse GitHub response as JSON (%s): %s",
+            type(exc).__name__,
+            exc,
+        )
+        return []
+    except Exception as exc:
+        logger.error(
+            "Failed to parse GitHub tool response (%s): %s",
+            type(exc).__name__,
+            exc,
+        )
         return []
 
 
