@@ -5,7 +5,7 @@ export NODE_IP
 
 ROOM ?= war-room
 
-.PHONY: up down restart logs token kill-orphans playground dashboard
+.PHONY: up down restart logs token kill-orphans playground dashboard demo demo-stop
 
 # Kill orphaned Python workers from previous `dev` mode runs before starting
 # Docker. These zombies connect to :7880 and steal jobs from the real agent.
@@ -43,3 +43,19 @@ playground:
 dashboard:
 	@echo "Opening dashboard at http://localhost:3000"
 	@open http://localhost:3000 2>/dev/null || echo "Open http://localhost:3000 in your browser"
+
+# Demo mode: runs dashboard + scripted backend without LiveKit/MCP/API keys.
+# Backend runs locally via uv; frontend via Docker (nginx proxy to host).
+demo:
+	@echo "Starting demo mode (no LiveKit required)..."
+	@echo "  Backend: http://localhost:8000  (uvicorn + demo scenario)"
+	@echo "  Frontend: http://localhost:3000  (nginx → backend)"
+	@docker compose -f docker-compose.demo.yml up --build -d
+	@uv run python -m war_room_copilot.api.demo_server &
+	@sleep 2
+	@open http://localhost:3000 2>/dev/null || echo "Open http://localhost:3000 in your browser"
+
+demo-stop:
+	@docker compose -f docker-compose.demo.yml down
+	@pkill -f "war_room_copilot.api.demo_server" 2>/dev/null || true
+	@echo "Demo stopped."
