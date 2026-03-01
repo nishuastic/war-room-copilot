@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     speechmatics_max_speakers: int = Field(default=10)
     speechmatics_speaker_sensitivity: float = Field(default=0.5)
     speechmatics_enable_entities: bool = Field(default=True)
+    speechmatics_language: str = Field(default="en")
+    speechmatics_output_locale: str = Field(default="")
 
     # Default repo for get_repo_context()
     default_repo_owner: str = Field(default="")

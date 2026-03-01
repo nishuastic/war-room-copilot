@@ -15,7 +15,10 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from starlette.responses import StreamingResponse
+
+from war_room_copilot.api.dashboard import DASHBOARD_HTML
 
 logger = logging.getLogger("war-room-copilot.api")
 
@@ -41,6 +44,12 @@ def set_state_ref(state: dict[str, Any]) -> None:
     """Point the API at the live session state dict."""
     global _state_ref  # noqa: PLW0603
     _state_ref = state
+
+
+@app.get("/", response_class=HTMLResponse)
+async def dashboard() -> str:
+    """Serve the self-contained dashboard UI."""
+    return DASHBOARD_HTML
 
 
 @app.get("/events")

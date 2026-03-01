@@ -3,12 +3,11 @@
               ┌──────────┐
               │  router  │
               └────┬─────┘
-      ┌────────┬───┴───┬──────────┐
-      ▼        ▼       ▼          ▼
-investigate  summarize recall   respond
- (GitHub)
-      │        │       │          │
-      └────────┴───┬───┴──────────┘
+    ┌─────┬────┬───┴───┬────┬─────┬───────┬──────────┐
+    ▼     ▼    ▼       ▼    ▼     ▼       ▼          ▼
+invest  summ  recall  resp contr postm  sentry  pagerduty
+    │     │    │       │    │     │       │          │
+    └─────┴────┴───┬───┴────┴─────┴───────┴──────────┘
                    ▼
                  END
 """
@@ -22,9 +21,11 @@ from langgraph.graph import END, StateGraph
 
 from war_room_copilot.graph.nodes.contradict import contradict_node
 from war_room_copilot.graph.nodes.github_research import github_research_node
+from war_room_copilot.graph.nodes.pagerduty_research import pagerduty_research_node
 from war_room_copilot.graph.nodes.postmortem import postmortem_node
 from war_room_copilot.graph.nodes.recall import recall_node
 from war_room_copilot.graph.nodes.respond import respond_node
+from war_room_copilot.graph.nodes.sentry_research import sentry_research_node
 from war_room_copilot.graph.nodes.skill_router import skill_router_node
 from war_room_copilot.graph.nodes.summarize import summarize_node
 from war_room_copilot.graph.state import IncidentState
@@ -42,6 +43,8 @@ def _route_after_router(state: IncidentState) -> str:
         "respond": "respond",
         "contradict": "contradict",
         "postmortem": "postmortem",
+        "sentry": "sentry",
+        "pagerduty": "pagerduty",
     }.get(skill, "respond")
 
 
@@ -60,6 +63,8 @@ def build_incident_graph() -> Any:
     graph.add_node("respond", respond_node)
     graph.add_node("contradict", contradict_node)
     graph.add_node("postmortem", postmortem_node)
+    graph.add_node("sentry", sentry_research_node)
+    graph.add_node("pagerduty", pagerduty_research_node)
 
     # Entry point
     graph.set_entry_point("router")
@@ -75,6 +80,8 @@ def build_incident_graph() -> Any:
             "respond": "respond",
             "contradict": "contradict",
             "postmortem": "postmortem",
+            "sentry": "sentry",
+            "pagerduty": "pagerduty",
         },
     )
 
@@ -85,6 +92,8 @@ def build_incident_graph() -> Any:
     graph.add_edge("respond", END)
     graph.add_edge("contradict", END)
     graph.add_edge("postmortem", END)
+    graph.add_edge("sentry", END)
+    graph.add_edge("pagerduty", END)
 
     return graph.compile()
 

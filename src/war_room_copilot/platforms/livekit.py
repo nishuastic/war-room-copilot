@@ -398,19 +398,23 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
         _session_state["speakers"][s.label] = s.label
 
     cfg = get_settings()
-    stt = speechmatics.STT(
-        operating_point=cfg.speechmatics_operating_point,
-        turn_detection_mode=TurnDetectionMode.SMART_TURN,
-        enable_diarization=True,
-        max_speakers=cfg.speechmatics_max_speakers,
-        speaker_sensitivity=cfg.speechmatics_speaker_sensitivity,
-        additional_vocab=INCIDENT_VOCAB,
-        enable_entities=cfg.speechmatics_enable_entities,
-        speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
-        speaker_passive_format=("<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>"),
-        focus_speakers=["S1"],
-        known_speakers=lk_speakers,
-    )
+    stt_kwargs: dict[str, Any] = {
+        "operating_point": cfg.speechmatics_operating_point,
+        "turn_detection_mode": TurnDetectionMode.SMART_TURN,
+        "enable_diarization": True,
+        "max_speakers": cfg.speechmatics_max_speakers,
+        "speaker_sensitivity": cfg.speechmatics_speaker_sensitivity,
+        "additional_vocab": INCIDENT_VOCAB,
+        "enable_entities": cfg.speechmatics_enable_entities,
+        "speaker_active_format": "<{speaker_id}>{text}</{speaker_id}>",
+        "speaker_passive_format": ("<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>"),
+        "focus_speakers": ["S1"],
+        "known_speakers": lk_speakers,
+        "language": cfg.speechmatics_language,
+    }
+    if cfg.speechmatics_output_locale:
+        stt_kwargs["output_locale"] = cfg.speechmatics_output_locale
+    stt = speechmatics.STT(**stt_kwargs)
 
     session = AgentSession(  # type: ignore[var-annotated]
         stt=stt,
@@ -458,9 +462,7 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
         # --- Wake word detection ---
         if _WAKE_WORD_RE.search(text):
             _session_state["direct_address"] = True
-            _session_state["direct_address_until"] = (
-                time.time() + _DIRECT_ADDRESS_TIMEOUT_S
-            )
+            _session_state["direct_address_until"] = time.time() + _DIRECT_ADDRESS_TIMEOUT_S
             logger.info(
                 "Wake word detected from %s — direct address mode ON",
                 display_name,
@@ -676,9 +678,7 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
         await asyncio.sleep(20)  # wait for conversation to start
         while True:
             async with _state_lock:
-                structured = list(
-                    _session_state.get("transcript_structured", [])
-                )
+                structured = list(_session_state.get("transcript_structured", []))
             now = time.time()
             if len(structured) >= 3:
                 # Check if last 3+ entries are from the same speaker
@@ -692,22 +692,17 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
                 ):
                     earliest = recent[0].get("epoch", now)
                     if now - earliest > 20:
-                        phrase = _BACKCHANNEL_PHRASES[
-                            _backchannel_idx % len(_BACKCHANNEL_PHRASES)
-                        ]
+                        phrase = _BACKCHANNEL_PHRASES[_backchannel_idx % len(_BACKCHANNEL_PHRASES)]
                         _backchannel_idx += 1
                         try:
                             await session.generate_reply(
                                 instructions=(
-                                    f"Say only '{phrase}' — nothing "
-                                    "more. Do not elaborate."
+                                    f"Say only '{phrase}' — nothing more. Do not elaborate."
                                 )
                             )
                             last_backchannel_time = time.time()
                         except Exception as exc:
-                            logger.debug(
-                                "Backchannel failed: %s", exc
-                            )
+                            logger.debug("Backchannel failed: %s", exc)
             # Jitter to avoid predictable timing
             await asyncio.sleep(15 + random.uniform(0, 5))
 

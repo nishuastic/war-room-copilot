@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from war_room_copilot.graph.llm import classify_llm_error, get_graph_llm
 from war_room_copilot.graph.state import IncidentState
@@ -23,6 +23,8 @@ into exactly ONE of these skills:
 - recall: User is asking about a previous decision or earlier discussion point
 - contradict: User asks to check for contradictions or inconsistencies in what was said
 - postmortem: User asks for a post-mortem, incident report, or wrap-up document
+- sentry: User asks about errors, exceptions, stack traces, or Sentry issues
+- pagerduty: User asks about on-call, PagerDuty incidents, who is paged, or alert escalation
 - respond: General conversation, greetings, or questions you can answer directly
 
 Reply with ONLY the skill name, nothing else. For example: investigate"""
@@ -35,6 +37,8 @@ VALID_SKILLS = {
     "respond",
     "contradict",
     "postmortem",
+    "sentry",
+    "pagerduty",
 }
 
 
@@ -45,11 +49,14 @@ async def skill_router_node(state: IncidentState) -> dict[str, Any]:
         return {"routed_skill": "respond"}
 
     llm = get_graph_llm()
-    messages = [ROUTER_SYSTEM_PROMPT, *state.get("messages", [])[-5:]]
+    # Always include the current query as the last message so the router
+    # classifies the actual request, not just stale conversation history.
+    context_msgs = state.get("messages", [])[-4:]
+    messages = [ROUTER_SYSTEM_PROMPT, *context_msgs, HumanMessage(content=query)]
 
     try:
         response = await llm.ainvoke(messages)
-        skill = str(response.content).strip().lower()
+        skill = str(response.content).strip().lower().split()[0]  # take first word only
         if skill not in VALID_SKILLS:
             logger.warning("Router returned unknown skill %r, defaulting to respond", skill)
             skill = "respond"
