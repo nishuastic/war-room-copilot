@@ -442,7 +442,9 @@ async def _entrypoint_inner(ctx: agents.JobContext) -> None:
     _state_lock = asyncio.Lock()
 
     # Demo warm-start: pre-seed state so dashboard is rich from the first second
-    if os.environ.get("DEMO_MODE", "").strip() in ("1", "true", "yes"):
+    import os as _os  # local import — os not at module level in this file
+
+    if _os.environ.get("DEMO_MODE", "").strip() in ("1", "true", "yes"):
         from war_room_copilot.api.demo_seed import seed_demo_state
 
         seed_demo_state(_session_state)
