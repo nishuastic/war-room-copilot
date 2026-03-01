@@ -10,6 +10,7 @@ import uuid
 from typing import Any
 
 from backboard import BackboardClient
+from backboard.exceptions import BackboardNotFoundError
 
 from ..config import (
     BACKBOARD_DECISION_ASSISTANT_FILE,
@@ -58,6 +59,17 @@ class DecisionTracker:
         self._decision_assistant_id: str | None = None
         self._decision_thread_id: str | None = None
 
+    async def _create_assistant(self) -> str:
+        """Create a new Backboard decision assistant and cache its ID."""
+        assistant: Any = await self._client.create_assistant(
+            name="War Room Decision Extractor",
+            system_prompt=_DECISION_SYSTEM_PROMPT,
+        )
+        assistant_id = str(assistant.assistant_id)
+        with open(BACKBOARD_DECISION_ASSISTANT_FILE, "w") as f:
+            json.dump({"assistant_id": assistant_id}, f)
+        return assistant_id
+
     async def initialize(self) -> None:
         """Load or create the decision-extraction Backboard assistant."""
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -67,15 +79,20 @@ class DecisionTracker:
                 data = json.load(f)
             self._decision_assistant_id = data["assistant_id"]
         else:
-            assistant: Any = await self._client.create_assistant(
-                name="War Room Decision Extractor",
-                system_prompt=_DECISION_SYSTEM_PROMPT,
-            )
-            self._decision_assistant_id = str(assistant.assistant_id)
-            with open(BACKBOARD_DECISION_ASSISTANT_FILE, "w") as f:
-                json.dump({"assistant_id": self._decision_assistant_id}, f)
+            self._decision_assistant_id = await self._create_assistant()
+            logger.info("Created decision assistant: %s", self._decision_assistant_id)
 
-        thread: Any = await self._client.create_thread(self._decision_assistant_id)
+        try:
+            thread: Any = await self._client.create_thread(self._decision_assistant_id)
+        except BackboardNotFoundError:
+            logger.warning(
+                "Cached decision assistant %s not found — recreating",
+                self._decision_assistant_id,
+            )
+            self._decision_assistant_id = await self._create_assistant()
+            logger.info("Created decision assistant: %s", self._decision_assistant_id)
+            thread = await self._client.create_thread(self._decision_assistant_id)
+
         self._decision_thread_id = str(thread.thread_id)
         logger.info("Decision tracker initialized (assistant=%s)", self._decision_assistant_id)
 

@@ -17,17 +17,26 @@ _ROUTER_SYSTEM_PROMPT = """\
 You are a skill classifier for a production incident war room AI assistant.
 
 Given the recent conversation context and the user's message, \
-classify the intent into exactly one skill:
+classify the intent into EXACTLY one of these six skills. \
+You MUST pick from this list — no other values are allowed:
 
-- **debug**: Root cause analysis, asks "why" something broke, trace an error.
-- **ideate**: Brainstorming, "what should we do", options or trade-offs.
-- **investigate**: Proactively look something up — commits, code, files.
-- **recall**: Past decisions, previous incidents, "what did we decide".
-- **summarize**: Status update, recap, "where are we", "what do we know".
-- **general**: Anything else — greetings, unclear intent, acknowledgements.
+- **debug**: Root cause analysis, "why did this break", trace errors, \
+find the cause. E.g. "why is the API returning 500s?", "what caused the spike?"
+- **ideate**: Brainstorming solutions, "what should we do", weighing options, \
+trade-offs, mitigation strategies. E.g. "should we rollback or hotfix?"
+- **investigate**: Proactively look something up in code, commits, PRs, or files. \
+E.g. "check the last deploy", "what changed in the auth service?", "look at the logs"
+- **recall**: Asking about past decisions, previous incidents, history. \
+E.g. "what did we decide last time?", "have we seen this before?"
+- **summarize**: Status updates, recaps, catch-ups, "what's going on", \
+"where are we", gathering context. E.g. "what's up?", "give me a summary", \
+"what do we know so far?", "bring me up to speed"
+- **general**: Greetings, acknowledgements, thanks, off-topic, or unclear intent. \
+E.g. "hey Sam", "ok thanks", "got it"
 
 Respond with JSON only:
-{"skill": "<skill>", "confidence": <0.0-1.0>, "reasoning": "<one sentence>"}
+{"skill": "<one of: debug, ideate, investigate, recall, summarize, general>", \
+"confidence": <0.0-1.0>, "reasoning": "<one sentence>"}
 """
 
 
@@ -65,7 +74,14 @@ class SkillRouter:
             raw = response.choices[0].message.content or "{}"
             data = json.loads(raw)
 
-            skill = Skill(data["skill"].lower())
+            try:
+                skill = Skill(data["skill"].lower())
+            except ValueError:
+                logger.warning(
+                    "LLM returned unknown skill %r — defaulting to GENERAL",
+                    data["skill"],
+                )
+                skill = Skill.GENERAL
             confidence = max(0.0, min(1.0, float(data["confidence"])))
             reasoning = str(data.get("reasoning", ""))
 

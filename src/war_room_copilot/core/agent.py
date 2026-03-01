@@ -12,9 +12,20 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-# Silence noisy livekit debug logs
-for _lk_logger_name in ("livekit", "livekit.agents", "livekit.rtc"):
-    logging.getLogger(_lk_logger_name).setLevel(logging.WARNING)
+# Silence noisy debug logs from third-party libraries
+for _logger_name in (
+    "livekit",
+    "livekit.agents",
+    "livekit.rtc",
+    "livekit.plugins",
+    "livekit.plugins.speechmatics",
+    "aiosqlite",
+    "speechmatics",
+    "httpx",
+    "httpcore",
+    "asyncio",
+):
+    logging.getLogger(_logger_name).setLevel(logging.WARNING)
 
 from livekit import agents
 from livekit.agents import Agent, AgentSession, RoomInputOptions, StopResponse, llm
