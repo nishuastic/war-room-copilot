@@ -1,0 +1,115 @@
+{
+  "gke_logs": {
+    "cluster": "war-room-gke-prod",
+    "zone": "us-central1-a",
+    "namespaces": {
+      "stt": {
+        "pods": [
+          {
+            "name": "speechmatics-proxy-7d8f9c-xk2lp",
+            "status": "OOMKilled",
+            "restarts": 4,
+            "last_restart": "2026-03-01T07:55:12Z",
+            "container": {
+              "name": "speechmatics-proxy",
+              "image": "gcr.io/war-room-prod/speechmatics-proxy:0.3.1",
+              "cpu_request": "500m",
+              "cpu_limit": "1000m",
+              "memory_request": "512Mi",
+              "memory_limit": "512Mi",
+              "last_state": {
+                "terminated": {
+                  "exitCode": 137,
+                  "reason": "OOMKilled",
+                  "finishedAt": "2026-03-01T07:55:10Z"
+                }
+              }
+            },
+            "logs": [
+              {
+                "timestamp": "2026-03-01T07:54:45.000Z",
+                "severity": "WARNING",
+                "message": "Memory usage at 490Mi / 512Mi limit — approaching OOM"
+              },
+              {
+                "timestamp": "2026-03-01T07:55:05.000Z",
+                "severity": "ERROR",
+                "message": "Large audio buffer detected: 45MB in-flight transcription queue"
+              },
+              {
+                "timestamp": "2026-03-01T07:55:10.000Z",
+                "severity": "CRITICAL",
+                "message": "Process killed by OOM killer (signal 9). Memory: 512Mi / 512Mi"
+              }
+            ]
+          },
+          {
+            "name": "speechmatics-proxy-7d8f9c-m3nqr",
+            "status": "Running",
+            "restarts": 0,
+            "container": {
+              "name": "speechmatics-proxy",
+              "image": "gcr.io/war-room-prod/speechmatics-proxy:0.3.1",
+              "memory_request": "512Mi",
+              "memory_limit": "512Mi"
+            },
+            "logs": [
+              {
+                "timestamp": "2026-03-01T08:00:00.000Z",
+                "severity": "INFO",
+                "message": "WebSocket server listening on :9080"
+              },
+              {
+                "timestamp": "2026-03-01T08:04:22.000Z",
+                "severity": "WARNING",
+                "message": "Single replica handling 2x normal load — latency elevated to 2800ms"
+              }
+            ]
+          }
+        ]
+      },
+      "archiver": {
+        "pods": [
+          {
+            "name": "transcript-archiver-run-v1-abc12",
+            "status": "Succeeded",
+            "runtime": "Cloud Run",
+            "logs": [
+              {
+                "timestamp": "2026-03-01T08:00:05.000Z",
+                "severity": "INFO",
+                "message": "Archiver started for session room_inc_20260301_01"
+              },
+              {
+                "timestamp": "2026-03-01T08:01:30.000Z",
+                "severity": "INFO",
+                "message": "Transcript archived: 142 segments, 3 speakers, 12 decisions"
+              },
+              {
+                "timestamp": "2026-03-01T08:01:31.000Z",
+                "severity": "INFO",
+                "message": "Uploaded to GCS: gs://war-room-transcripts/2026/03/01/room_inc_20260301_01.jsonl"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "cloud_monitoring_metrics": {
+    "speechmatics-proxy": {
+      "memory_usage_mib": {
+        "current": 498,
+        "limit": 512,
+        "utilization_pct": 97.3
+      },
+      "cpu_millicores": {
+        "current": 820,
+        "limit": 1000,
+        "utilization_pct": 82.0
+      },
+      "oom_kills_last_hour": 4,
+      "pod_restarts_last_hour": 4
+    }
+  }
+}

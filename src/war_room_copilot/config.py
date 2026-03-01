@@ -5,7 +5,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parents[2]
 
 # LLM
-LLM_MODEL = "gpt-4o"
+LLM_MODEL = "gpt-4.1"
 
 # Skill router
 ROUTER_MODEL = "gpt-4.1-mini"
@@ -15,12 +15,12 @@ CONFIDENCE_DASHBOARD = 0.4
 
 # Per-skill LLM models — (provider, model) tuples, easily swappable per-skill
 SKILL_LLM_MODELS: dict[str, tuple[str, str]] = {
-    "debug": ("openai", "gpt-4.1-mini"),
-    "ideate": ("openai", "gpt-4.1-mini"),
-    "investigate": ("openai", "gpt-4.1-mini"),
-    "recall": ("openai", "gpt-4.1-mini"),
-    "summarize": ("openai", "gpt-4.1-mini"),
-    "general": ("openai", "gpt-4.1-mini"),
+    "debug": ("openai", "gpt-4.1"),
+    "ideate": ("openai", "gpt-4.1"),
+    "investigate": ("openai", "gpt-4.1"),
+    "recall": ("openai", "gpt-4.1"),
+    "summarize": ("openai", "gpt-4.1"),
+    "general": ("openai", "gpt-4.1"),
 }
 
 # TTS
@@ -33,7 +33,7 @@ VOICEPRINT_INITIAL_DELAY = 15  # seconds
 
 # Wake word
 WAKE_WORD = "sam"
-WAKE_WORD_BUFFER = 0.25  # seconds to buffer after wake word for sentence completion
+WAKE_WORD_BUFFER = 1.0  # seconds to buffer after wake word for sentence completion
 
 # File paths
 DATA_DIR = PROJECT_ROOT / ".data"
@@ -64,3 +64,11 @@ CARBON_G_PER_LLM_CALL = 0.2  # ~0.2g CO2 per call
 
 # Runbooks
 RUNBOOKS_FILE = PROJECT_ROOT / "mock_data" / "runbooks.yaml"
+
+# Datadog
+# Get these from: datadoghq.com → Organization Settings → API Keys / Application Keys
+# DD_SITE: e.g. "datadoghq.com" (US1), "us3.datadoghq.com", "datadoghq.eu" (EU)
+# When not set, all Datadog tools return mock data from mock_data/datadog_spans.json
+DATADOG_API_KEY = ""  # override via DATADOG_API_KEY env var
+DATADOG_APP_KEY = ""  # override via DATADOG_APP_KEY env var
+DD_SITE = "datadoghq.com"  # override via DD_SITE env var

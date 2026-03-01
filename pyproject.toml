@@ -17,6 +17,8 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "pyyaml>=6.0",
     "openai>=1.0",
+    "datadog-api-client>=2.0",
+    "ddtrace>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -43,7 +45,7 @@ python_version = "3.12"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["livekit.*", "github.*", "backboard.*", "aiosqlite.*", "uvicorn.*", "yaml.*"]
+module = ["livekit.*", "github.*", "backboard.*", "aiosqlite.*", "uvicorn.*", "yaml.*", "datadog_api_client.*", "ddtrace.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

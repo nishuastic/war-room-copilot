@@ -64,6 +64,32 @@ cp .env.example .env
 
 Edit `.env` and set your `OPENAI_API_KEY`, `SPEECHMATICS_API_KEY`, `ELEVENLABS_API_KEY`, and `GITHUB_TOKEN`. Optionally set `BACKBOARD_API_KEY` for cross-session memory and decision tracking. The LiveKit defaults are already configured for local dev. Also set `GITHUB_ALLOWED_REPOS` in `src/war_room_copilot/config.py` to the repos you want the agent to access.
 
+**GitHub token scope:** The read-only tools (`search_code`, `get_recent_commits`, etc.) need `public_repo` or `repo`. The write tools (`create_github_issue`, `revert_commit`, `close_pull_request`) additionally require the full **`repo`** scope — go to GitHub → Settings → Developer Settings → Personal Access Tokens → edit your token → check **repo**.
+
+**Datadog (optional — all tools fall back to realistic mock data without it):**
+
+1. Sign up at [datadoghq.com](https://datadoghq.com) (free trial works)
+2. Get your API key: **Organization Settings → API Keys → New Key**
+3. Get your App key: **Organization Settings → Application Keys → New Key**
+4. Add to `.env`:
+   ```
+   DATADOG_API_KEY=<your-api-key>
+   DATADOG_APP_KEY=<your-app-key>
+   DD_SITE=datadoghq.com   # or us3.datadoghq.com / datadoghq.eu
+   ```
+5. Seed demo data into your Datadog account (one-time):
+   ```bash
+   uv run python scripts/seed_datadog.py
+   ```
+   This pushes APM-style metrics, structured logs, and custom metric series matching the incident scenarios in `mock_data/test_dialogues.md`.
+6. Optional — install the Datadog Agent locally for full APM traces via `ddtrace`:
+   ```bash
+   DD_API_KEY=<key> bash -c "$(curl -L https://install.datadoghq.com/scripts/install_mac_os.sh)"
+   ```
+   Without the Agent, `seed_datadog.py` will skip APM spans but still push metrics and logs.
+
+> **Datadog MCP:** The official Datadog MCP server (`docs.datadoghq.com/bits_ai/mcp_server`) is allowlist-only preview — not generally available. The agent uses `datadog-api-client` Python SDK directly instead, which gives the same access without needing MCP. If you get allowlist access and want to use Datadog MCP in Claude Code for your own queries, add it to `.claude/mcp.json`.
+
 ### 3. Start LiveKit server (Terminal 1)
 
 ```bash
@@ -185,8 +211,12 @@ src/war_room_copilot/
 │   ├── prompts.py        # Per-skill prompt suffixes
 │   └── router.py         # Intent classification via GPT-4.1-nano
 ├── tools/
-│   ├── github.py         # GitHub tools (search, commits, PRs, blame)
-│   └── recall.py         # Decision recall tool
+│   ├── github.py         # GitHub tools (read: search/commits/PRs/blame; write: issues/revert/close-PR)
+│   ├── recall.py         # Decision recall tool
+│   ├── datadog.py        # Datadog monitoring (metrics, logs, APM, monitors)
+│   ├── logs.py           # Multi-cloud logs: AWS CloudWatch/ECS/Lambda, GCP GKE, Azure AKS
+│   ├── service_graph.py  # Service dependency graph and health status
+│   └── runbook.py        # Runbook search from mock_data/runbooks.yaml
 ├── config.py             # Centralized configuration
 └── models.py             # Pydantic models
 assets/

@@ -62,16 +62,36 @@ from ..skills import SKILL_PROMPTS, SkillResult, SkillRouter
 from ..skills.investigation import run_investigation
 from ..skills.models import Skill
 from ..skills.summarization import run_summarization
+from ..tools.datadog import (
+    get_datadog_monitors,
+    query_datadog_apm,
+    query_datadog_logs,
+    query_datadog_metrics,
+)
 from ..tools.github import (
+    close_pull_request,
+    create_github_issue,
     get_blame,
     get_commit_diff,
     get_recent_commits,
     list_pull_requests,
     read_file,
+    revert_commit,
     search_code,
     search_issues,
 )
+from ..tools.logs import (
+    query_aks_logs,
+    query_azure_monitor,
+    query_cloudwatch_logs,
+    query_ecs_logs,
+    query_gcp_logs,
+    query_gke_pod_logs,
+    query_lambda_logs,
+)
 from ..tools.recall import recall_decision, set_memory_context
+from ..tools.runbook import search_runbook
+from ..tools.service_graph import get_service_dependencies, get_service_graph, get_service_health
 
 load_dotenv()
 
@@ -472,10 +492,19 @@ class WarRoomAgent(Agent):
         if skill_prompt:
             await self.update_instructions(self._base_instructions + skill_prompt)
 
+        # Skills that must look up real data: force the LLM to call at least one tool.
+        # GENERAL/IDEATE are left as "auto" since they may not need tool calls.
+        _tool_choice: str = (
+            "required"
+            if skill_result.skill in (Skill.INVESTIGATE, Skill.DEBUG, Skill.RECALL, Skill.SUMMARIZE)
+            else "auto"
+        )
+
         try:
-            logger.info("Generating reply for: [%s] %s", speaker, combined_text)
+            logger.info("Generating reply for: [%s] %s (tool_choice=%s)", speaker, combined_text, _tool_choice)
             handle = self.session.generate_reply(
                 user_input=f"[{speaker}] {combined_text}",
+                tool_choice=_tool_choice,  # type: ignore[arg-type]
             )
             logger.info("generate_reply returned handle %s", handle.id)
             await handle
@@ -563,6 +592,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     )
 
     tools: list[Any] = [
+        # GitHub — read
         search_code,
         get_recent_commits,
         get_commit_diff,
@@ -570,7 +600,33 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         search_issues,
         read_file,
         get_blame,
+        # GitHub — write (requires 'repo' scope on GITHUB_TOKEN)
+        create_github_issue,
+        revert_commit,
+        close_pull_request,
+        # Memory
         recall_decision,
+        # Runbooks
+        search_runbook,
+        # Service graph
+        get_service_graph,
+        get_service_dependencies,
+        get_service_health,
+        # Datadog monitoring
+        query_datadog_metrics,
+        query_datadog_logs,
+        query_datadog_apm,
+        get_datadog_monitors,
+        # AWS logs
+        query_cloudwatch_logs,
+        query_ecs_logs,
+        query_lambda_logs,
+        # GCP logs
+        query_gcp_logs,
+        query_gke_pod_logs,
+        # Azure logs
+        query_azure_monitor,
+        query_aks_logs,
     ]
 
     session: AgentSession[Any] = AgentSession(
@@ -609,25 +665,19 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     )
 
     # Trace tool calls and LLM responses via session events
-    @session.on("function_calls_collected")  # type: ignore[arg-type]
-    def _on_tool_calls(calls: Any) -> None:
-        for call in calls if isinstance(calls, list) else [calls]:
-            tool_name = getattr(call, "function_name", str(call))
-            raw_args = getattr(call, "arguments", {})
-            asyncio.create_task(
-                db.add_trace(session_id, "tool_call", {"tool": tool_name, "args": raw_args})
-            )
-        # Count LLM call
+    @session.on("function_tools_executed")  # type: ignore[arg-type]
+    def _on_tools_executed(ev: Any) -> None:
         asyncio.create_task(db.update_metrics(session_id, llm_calls=1))
-
-    @session.on("function_calls_finished")  # type: ignore[arg-type]
-    def _on_tool_results(calls: Any) -> None:
-        for call in calls if isinstance(calls, list) else [calls]:
-            tool_name = getattr(call, "function_name", str(call))
-            result_preview = str(getattr(call, "result", ""))[:500]
+        for call, output in ev.zipped():
+            tool_name = getattr(call, "name", str(call))
+            raw_args = getattr(call, "arguments", {})
+            result_preview = str(getattr(output, "output", ""))[:300] if output else ""
+            logger.info("Tool call: %s(%s) → %s", tool_name, raw_args, result_preview[:100])
             asyncio.create_task(
                 db.add_trace(
-                    session_id, "tool_result", {"tool": tool_name, "result": result_preview}
+                    session_id,
+                    "tool_call",
+                    {"tool": tool_name, "args": raw_args, "result": result_preview},
                 )
             )
 

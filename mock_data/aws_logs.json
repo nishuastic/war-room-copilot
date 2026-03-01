@@ -1,0 +1,137 @@
+{
+  "cloudwatch_log_groups": {
+    "/ecs/war-room-prod/livekit-agent": {
+      "log_streams": ["livekit-agent/livekit-agent/abc123"],
+      "events": [
+        {
+          "timestamp": "2026-03-01T08:00:15.123Z",
+          "message": "ECS task started: livekit-agent v0.1.0 on Fargate (taskId=abc123def456)"
+        },
+        {
+          "timestamp": "2026-03-01T08:01:30.456Z",
+          "message": "[ERROR] Backboard gateway returned 504 after 12.1s — tool call failed"
+        },
+        {
+          "timestamp": "2026-03-01T08:02:45.789Z",
+          "message": "[WARNING] ElevenLabs TTS returned 429 — agent will not speak this turn"
+        },
+        {
+          "timestamp": "2026-03-01T08:03:00.000Z",
+          "message": "[INFO] Skill routed: INVESTIGATE (confidence=0.82) for query 'check backboard latency'"
+        },
+        {
+          "timestamp": "2026-03-01T08:05:00.000Z",
+          "message": "[INFO] Session room_inc_20260301_01 started. 3 participants detected."
+        }
+      ]
+    },
+    "/ecs/war-room-prod/fastapi-dashboard": {
+      "log_streams": ["fastapi-dashboard/fastapi-dashboard/xyz789"],
+      "events": [
+        {
+          "timestamp": "2026-03-01T07:58:00.000Z",
+          "message": "ECS task started: fastapi-dashboard v0.1.0 (taskId=xyz789abc012)"
+        },
+        {
+          "timestamp": "2026-03-01T08:00:00.000Z",
+          "message": "Uvicorn started on 0.0.0.0:8080"
+        },
+        {
+          "timestamp": "2026-03-01T08:05:01.234Z",
+          "message": "GET /api/sessions 200 OK (12ms)"
+        },
+        {
+          "timestamp": "2026-03-01T08:05:02.100Z",
+          "message": "WebSocket /api/stream connected: client 10.0.1.42"
+        },
+        {
+          "timestamp": "2026-03-01T08:10:00.000Z",
+          "message": "GET /health 200 OK (1ms)"
+        }
+      ]
+    },
+    "/aws/lambda/war-room-webhook-handler": {
+      "log_streams": ["2026/03/01/[$LATEST]lambda001"],
+      "events": [
+        {
+          "timestamp": "2026-03-01T08:01:00.000Z",
+          "message": "START RequestId: a1b2c3d4-e5f6-7890-abcd-ef1234567890 Version: $LATEST"
+        },
+        {
+          "timestamp": "2026-03-01T08:01:00.100Z",
+          "message": "Received GitHub webhook: push to main (commit: 14b6316)"
+        },
+        {
+          "timestamp": "2026-03-01T08:01:00.500Z",
+          "message": "Notified war-room agent of new deploy event"
+        },
+        {
+          "timestamp": "2026-03-01T08:01:00.600Z",
+          "message": "END RequestId: a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        },
+        {
+          "timestamp": "2026-03-01T08:01:00.700Z",
+          "message": "REPORT RequestId: a1b2c3d4-e5f6-7890-abcd-ef1234567890 Duration: 600.00 ms Billed Duration: 600 ms Memory Size: 128 MB Max Memory Used: 64 MB"
+        }
+      ]
+    },
+    "/aws/rds/war-room-db/postgresql": {
+      "log_streams": ["war-room-db"],
+      "events": [
+        {
+          "timestamp": "2026-03-01T08:00:30.000Z",
+          "message": "LOG: connection received: host=10.0.2.15 port=54321"
+        },
+        {
+          "timestamp": "2026-03-01T08:01:00.000Z",
+          "message": "LOG: duration: 4523.456 ms statement: SELECT * FROM memory_entries WHERE assistant_id = 'asst_backboard_prod_01' ORDER BY created_at DESC LIMIT 100"
+        },
+        {
+          "timestamp": "2026-03-01T08:01:45.000Z",
+          "message": "LOG: duration: 8901.234 ms statement: INSERT INTO decisions (id, session_id, text, confidence) VALUES (...)"
+        },
+        {
+          "timestamp": "2026-03-01T08:02:00.000Z",
+          "message": "FATAL: remaining connection slots are reserved for non-replication superuser connections"
+        },
+        {
+          "timestamp": "2026-03-01T08:02:01.000Z",
+          "message": "FATAL: remaining connection slots are reserved for non-replication superuser connections"
+        },
+        {
+          "timestamp": "2026-03-01T08:02:05.000Z",
+          "message": "LOG: max_connections=100, active=100, idle=0. Consider increasing max_connections or deploying PgBouncer."
+        }
+      ]
+    }
+  },
+  "ecs_metrics": {
+    "cluster": "war-room-prod",
+    "services": {
+      "livekit-agent-svc": {
+        "desired_count": 2,
+        "running_count": 2,
+        "pending_count": 0,
+        "cpu_utilization_pct": 62.4,
+        "memory_utilization_pct": 71.2,
+        "task_definition": "livekit-agent:42"
+      },
+      "backboard-gateway-svc": {
+        "desired_count": 1,
+        "running_count": 1,
+        "pending_count": 0,
+        "cpu_utilization_pct": 88.9,
+        "memory_utilization_pct": 94.1,
+        "task_definition": "backboard-gateway:17"
+      },
+      "fastapi-dashboard-svc": {
+        "desired_count": 1,
+        "running_count": 1,
+        "pending_count": 0,
+        "cpu_utilization_pct": 12.3,
+        "memory_utilization_pct": 28.7,
+        "task_definition": "fastapi-dashboard:9"
+      }
+    }
+  }
+}

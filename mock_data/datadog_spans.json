@@ -1,0 +1,152 @@
+{
+  "traces": [
+    {
+      "trace_id": "7b2f4a8c1e6d3f90",
+      "spans": [
+        {
+          "span_id": "a1b2c3d4e5f60001",
+          "parent_span_id": null,
+          "service": "livekit-agent",
+          "resource": "agent.handle_request",
+          "start": 1740787200000000,
+          "duration": 14823000,
+          "error": 0,
+          "meta": {
+            "env": "production",
+            "version": "0.1.0",
+            "http.method": "POST",
+            "http.url": "/api/skill"
+          },
+          "metrics": {
+            "system.cpu": 62.4,
+            "system.mem": 512.0
+          }
+        },
+        {
+          "span_id": "a1b2c3d4e5f60002",
+          "parent_span_id": "a1b2c3d4e5f60001",
+          "service": "backboard-gateway",
+          "resource": "backboard.query_memory",
+          "start": 1740787200500000,
+          "duration": 12100000,
+          "error": 1,
+          "meta": {
+            "env": "production",
+            "version": "1.2.3",
+            "error.type": "TimeoutError",
+            "error.msg": "Upstream backboard response exceeded 12s threshold",
+            "http.status_code": "504"
+          },
+          "metrics": {
+            "backboard.request_size_bytes": 4096,
+            "backboard.response_time_ms": 12100
+          }
+        },
+        {
+          "span_id": "a1b2c3d4e5f60003",
+          "parent_span_id": "a1b2c3d4e5f60001",
+          "service": "elevenlabs-tts",
+          "resource": "tts.synthesize",
+          "start": 1740787212800000,
+          "duration": 890000,
+          "error": 1,
+          "meta": {
+            "env": "production",
+            "error.type": "RateLimitError",
+            "error.msg": "429 Too Many Requests",
+            "http.status_code": "429",
+            "tts.voice_id": "21m00Tcm4TlvDq8ikWAM",
+            "tts.chars": 342
+          },
+          "metrics": {
+            "tts.latency_ms": 890
+          }
+        }
+      ]
+    },
+    {
+      "trace_id": "3c9e1d7a2b5f8e40",
+      "spans": [
+        {
+          "span_id": "b1b2c3d4e5f60001",
+          "parent_span_id": null,
+          "service": "livekit-agent",
+          "resource": "agent.handle_request",
+          "start": 1740787260000000,
+          "duration": 3210000,
+          "error": 0,
+          "meta": {
+            "env": "production",
+            "version": "0.1.0"
+          },
+          "metrics": {
+            "system.cpu": 45.1
+          }
+        },
+        {
+          "span_id": "b1b2c3d4e5f60002",
+          "parent_span_id": "b1b2c3d4e5f60001",
+          "service": "speechmatics-proxy",
+          "resource": "stt.transcribe",
+          "start": 1740787260100000,
+          "duration": 2800000,
+          "error": 0,
+          "meta": {
+            "env": "production",
+            "stt.language": "en",
+            "stt.diarization": "true",
+            "stt.speakers_detected": "3"
+          },
+          "metrics": {
+            "stt.audio_duration_ms": 4200,
+            "stt.latency_ms": 2800
+          }
+        }
+      ]
+    },
+    {
+      "trace_id": "9f4a2c8d6e1b7f30",
+      "spans": [
+        {
+          "span_id": "c1b2c3d4e5f60001",
+          "parent_span_id": null,
+          "service": "fastapi-dashboard",
+          "resource": "GET /api/sessions",
+          "start": 1740787320000000,
+          "duration": 45000,
+          "error": 0,
+          "meta": {
+            "env": "production",
+            "http.method": "GET",
+            "http.url": "/api/sessions",
+            "http.status_code": "200"
+          },
+          "metrics": {
+            "http.response_size_bytes": 2048
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "services": ["livekit-agent", "backboard-gateway", "speechmatics-proxy", "elevenlabs-tts", "fastapi-dashboard"],
+    "error_rate": {
+      "livekit-agent": 0.02,
+      "backboard-gateway": 0.34,
+      "elevenlabs-tts": 0.41,
+      "speechmatics-proxy": 0.01,
+      "fastapi-dashboard": 0.0
+    },
+    "p99_latency_ms": {
+      "livekit-agent": 14823,
+      "backboard-gateway": 12100,
+      "elevenlabs-tts": 890,
+      "speechmatics-proxy": 2800,
+      "fastapi-dashboard": 45
+    },
+    "time_range": {
+      "from": "2026-03-01T08:00:00Z",
+      "to": "2026-03-01T09:00:00Z"
+    }
+  }
+}

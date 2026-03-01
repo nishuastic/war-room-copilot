@@ -1,0 +1,161 @@
+{
+  "services": {
+    "livekit-agent": {
+      "description": "Core AI voice agent — handles wake word, skill routing, tool calling, TTS",
+      "version": "0.1.0",
+      "language": "Python 3.12",
+      "dependencies": [
+        "backboard-gateway",
+        "speechmatics-proxy",
+        "elevenlabs-tts",
+        "fastapi-dashboard",
+        "github-api"
+      ],
+      "health": "degraded",
+      "health_reason": "Downstream TTS and backboard failures causing partial outage",
+      "endpoints": [
+        {"path": "/ws/agent", "protocol": "WebSocket"},
+        {"path": "/health", "protocol": "HTTP"}
+      ],
+      "infra": {
+        "cloud": "aws",
+        "runtime": "ECS Fargate",
+        "cluster": "war-room-prod",
+        "service": "livekit-agent-svc",
+        "cpu": "1 vCPU",
+        "memory": "2GB"
+      }
+    },
+    "backboard-gateway": {
+      "description": "Persistent memory layer — long-term context storage and retrieval via Backboard SDK",
+      "version": "1.2.3",
+      "language": "Node.js 20",
+      "dependencies": [
+        "postgres-rds",
+        "redis-cache"
+      ],
+      "health": "unhealthy",
+      "health_reason": "Postgres connection pool exhausted (47 waiting), Redis unreachable",
+      "endpoints": [
+        {"path": "/api/memory/store", "protocol": "HTTP"},
+        {"path": "/api/memory/recall", "protocol": "HTTP"}
+      ],
+      "infra": {
+        "cloud": "aws",
+        "runtime": "ECS Fargate",
+        "cluster": "war-room-prod",
+        "service": "backboard-gateway-svc",
+        "cpu": "0.5 vCPU",
+        "memory": "1GB"
+      }
+    },
+    "speechmatics-proxy": {
+      "description": "STT proxy — forwards audio to Speechmatics API, handles diarization tags",
+      "version": "0.3.1",
+      "language": "Python 3.11",
+      "dependencies": [
+        "speechmatics-external-api"
+      ],
+      "health": "degraded",
+      "health_reason": "Pod OOMKilled in GKE, running on 1/2 replicas",
+      "endpoints": [
+        {"path": "/ws/transcribe", "protocol": "WebSocket"}
+      ],
+      "infra": {
+        "cloud": "gcp",
+        "runtime": "GKE",
+        "cluster": "war-room-gke-prod",
+        "namespace": "stt",
+        "pod_prefix": "speechmatics-proxy",
+        "cpu_request": "500m",
+        "memory_request": "512Mi",
+        "memory_limit": "512Mi"
+      }
+    },
+    "elevenlabs-tts": {
+      "description": "TTS service — converts agent text to voice audio via ElevenLabs API",
+      "version": "0.2.0",
+      "language": "Python 3.12",
+      "dependencies": [
+        "elevenlabs-external-api"
+      ],
+      "health": "unhealthy",
+      "health_reason": "Rate limit exhausted (98.4% of daily quota), all TTS requests failing",
+      "endpoints": [
+        {"path": "/api/synthesize", "protocol": "HTTP"}
+      ],
+      "infra": {
+        "cloud": "azure",
+        "runtime": "AKS",
+        "cluster": "war-room-aks-prod",
+        "namespace": "tts",
+        "cpu_request": "250m",
+        "memory_request": "256Mi"
+      }
+    },
+    "fastapi-dashboard": {
+      "description": "REST API + WebSocket server for the React frontend — serves session data and event streams",
+      "version": "0.1.0",
+      "language": "Python 3.12",
+      "dependencies": [
+        "sqlite-db"
+      ],
+      "health": "healthy",
+      "health_reason": null,
+      "endpoints": [
+        {"path": "/api/sessions", "protocol": "HTTP"},
+        {"path": "/api/stream", "protocol": "WebSocket"},
+        {"path": "/health", "protocol": "HTTP"}
+      ],
+      "infra": {
+        "cloud": "aws",
+        "runtime": "ECS Fargate",
+        "cluster": "war-room-prod",
+        "service": "fastapi-dashboard-svc",
+        "cpu": "0.25 vCPU",
+        "memory": "512MB"
+      }
+    },
+    "postgres-rds": {
+      "description": "Primary relational database for Backboard persistent memory",
+      "version": "16.2",
+      "health": "unhealthy",
+      "health_reason": "Max connections reached (100/100), new connections refused",
+      "infra": {
+        "cloud": "aws",
+        "runtime": "RDS",
+        "instance_type": "db.t3.micro",
+        "max_connections": 100,
+        "current_connections": 100,
+        "region": "us-east-1"
+      }
+    },
+    "redis-cache": {
+      "description": "Cache layer for Backboard session lookups and rate limiting",
+      "version": "7.2",
+      "health": "unhealthy",
+      "health_reason": "Instance not responding — ECONNREFUSED on port 6379",
+      "infra": {
+        "cloud": "aws",
+        "runtime": "ElastiCache",
+        "instance_type": "cache.t3.micro",
+        "region": "us-east-1"
+      }
+    }
+  },
+  "dependency_graph": {
+    "livekit-agent": ["backboard-gateway", "speechmatics-proxy", "elevenlabs-tts", "fastapi-dashboard"],
+    "backboard-gateway": ["postgres-rds", "redis-cache"],
+    "speechmatics-proxy": [],
+    "elevenlabs-tts": [],
+    "fastapi-dashboard": ["sqlite-db"],
+    "postgres-rds": [],
+    "redis-cache": []
+  },
+  "incident_impact": {
+    "root_causes": ["postgres-rds", "redis-cache"],
+    "affected_services": ["backboard-gateway", "elevenlabs-tts"],
+    "partial_impact": ["livekit-agent", "speechmatics-proxy"],
+    "unaffected": ["fastapi-dashboard"]
+  }
+}

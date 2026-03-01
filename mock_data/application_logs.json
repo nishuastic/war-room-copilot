@@ -1,0 +1,149 @@
+{
+  "logs": [
+    {
+      "timestamp": "2026-03-01T08:01:23.412Z",
+      "service": "livekit-agent",
+      "level": "ERROR",
+      "message": "STT transcription failed: Speechmatics WebSocket closed unexpectedly",
+      "trace_id": "7b2f4a8c1e6d3f90",
+      "fields": {
+        "error": "WebSocketConnectionClosedError",
+        "session_id": "room_inc_20260301_01",
+        "retry_count": 3
+      }
+    },
+    {
+      "timestamp": "2026-03-01T08:01:45.100Z",
+      "service": "livekit-agent",
+      "level": "WARNING",
+      "message": "Wake word detected but skill routing timed out after 2.0s, defaulting to GENERAL",
+      "trace_id": "7b2f4a8c1e6d3f90",
+      "fields": {
+        "wake_word": "sam",
+        "timeout_ms": 2000,
+        "fallback_skill": "GENERAL"
+      }
+    },
+    {
+      "timestamp": "2026-03-01T08:02:10.875Z",
+      "service": "backboard-gateway",
+      "level": "ERROR",
+      "message": "Memory query exceeded SLA: 12100ms (threshold: 5000ms)",
+      "trace_id": "7b2f4a8c1e6d3f90",
+      "fields": {
+        "query_type": "recall",
+        "assistant_id": "asst_backboard_prod_01",
+        "latency_ms": 12100,
+        "sla_ms": 5000
+      }
+    },
+    {
+      "timestamp": "2026-03-01T08:02:11.200Z",
+      "service": "backboard-gateway",
+      "level": "ERROR",
+      "message": "Postgres connection pool exhausted: max_connections=20, waiting=47",
+      "trace_id": "7b2f4a8c1e6d3f90",
+      "fields": {
+        "pool_size": 20,
+        "waiting_queries": 47,
+        "db_host": "war-room-db.internal",
+        "db_name": "backboard_prod"
+      }
+    },
+    {
+      "timestamp": "2026-03-01T08:03:00.000Z",
+      "service": "elevenlabs-tts",
+      "level": "ERROR",
+      "message": "Rate limit hit: 429 Too Many Requests. Retry-After: 60s",
+      "trace_id": "7b2f4a8c1e6d3f90",
+      "fields": {
+        "status_code": 429,
+        "retry_after_seconds": 60,
+        "voice_id": "21m00Tcm4TlvDq8ikWAM",
+        "chars_requested": 342,
+        "daily_quota_used_pct": 98.4
+      }
+    },
+    {
+      "timestamp": "2026-03-01T08:03:01.500Z",
+      "service": "elevenlabs-tts",
+      "level": "ERROR",
+      "message": "TTS synthesis failed for session room_inc_20260301_01 — agent will be silent",
+      "trace_id": "7b2f4a8c1e6d3f90",
+      "fields": {
+        "session_id": "room_inc_20260301_01",
+        "fallback": "none",
+        "impact": "agent_silent"
+      }
+    },
+    {
+      "timestamp": "2026-03-01T08:03:15.300Z",
+      "service": "elevenlabs-tts",
+      "level": "ERROR",
+      "message": "TTS synthesis failed for session room_inc_20260301_02 — agent will be silent",
+      "fields": {
+        "session_id": "room_inc_20260301_02",
+        "fallback": "none",
+        "impact": "agent_silent"
+      }
+    },
+    {
+      "timestamp": "2026-03-01T08:04:22.789Z",
+      "service": "speechmatics-proxy",
+      "level": "WARNING",
+      "message": "STT latency spike: 2800ms (avg 400ms). Possible network congestion",
+      "fields": {
+        "latency_ms": 2800,
+        "baseline_ms": 400,
+        "audio_duration_ms": 4200,
+        "speaker_count": 3
+      }
+    },
+    {
+      "timestamp": "2026-03-01T08:05:00.000Z",
+      "service": "fastapi-dashboard",
+      "level": "INFO",
+      "message": "Session stream opened for room_inc_20260301_01",
+      "fields": {
+        "session_id": "room_inc_20260301_01",
+        "client_ip": "10.0.1.42",
+        "user_agent": "Mozilla/5.0 (Macintosh)"
+      }
+    },
+    {
+      "timestamp": "2026-03-01T08:06:00.000Z",
+      "service": "livekit-agent",
+      "level": "INFO",
+      "message": "Backboard long-term memory loaded 3 past session decisions for context injection",
+      "fields": {
+        "decision_count": 3,
+        "session_id": "room_inc_20260301_01",
+        "load_time_ms": 234
+      }
+    },
+    {
+      "timestamp": "2026-03-01T08:07:30.100Z",
+      "service": "backboard-gateway",
+      "level": "ERROR",
+      "message": "Redis connection refused: ECONNREFUSED 127.0.0.1:6379",
+      "fields": {
+        "host": "127.0.0.1",
+        "port": 6379,
+        "error": "ECONNREFUSED",
+        "impact": "cache_miss_all_requests"
+      }
+    },
+    {
+      "timestamp": "2026-03-01T08:08:00.000Z",
+      "service": "backboard-gateway",
+      "level": "CRITICAL",
+      "message": "All 20 Postgres connections in use for >30s. New queries will fail.",
+      "fields": {
+        "pool_size": 20,
+        "active_connections": 20,
+        "idle_connections": 0,
+        "wait_queue_depth": 63
+      }
+    }
+  ]
+}

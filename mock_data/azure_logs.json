@@ -1,0 +1,144 @@
+{
+  "aks_logs": {
+    "cluster": "war-room-aks-prod",
+    "resource_group": "war-room-rg",
+    "region": "eastus",
+    "namespaces": {
+      "tts": {
+        "pods": [
+          {
+            "name": "elevenlabs-tts-6b9f4d-p7wqx",
+            "status": "Running",
+            "restarts": 0,
+            "container": {
+              "name": "elevenlabs-tts",
+              "image": "acrwarroomprod.azurecr.io/elevenlabs-tts:0.2.0",
+              "cpu_request": "250m",
+              "cpu_limit": "500m",
+              "memory_request": "256Mi",
+              "memory_limit": "512Mi"
+            },
+            "logs": [
+              {
+                "timestamp": "2026-03-01T08:00:00.000Z",
+                "severity": "INFO",
+                "message": "ElevenLabs TTS service started. Daily quota: 100000 chars."
+              },
+              {
+                "timestamp": "2026-03-01T08:02:30.000Z",
+                "severity": "WARNING",
+                "message": "Daily quota at 95% (95000/100000 chars). Rate limiting imminent."
+              },
+              {
+                "timestamp": "2026-03-01T08:03:00.000Z",
+                "severity": "ERROR",
+                "message": "ElevenLabs API returned 429 Too Many Requests. Retry-After: 60s."
+              },
+              {
+                "timestamp": "2026-03-01T08:03:01.000Z",
+                "severity": "ERROR",
+                "message": "Synthesis failed for text (342 chars): 'Based on the Datadog traces, I can see...' — agent will be silent."
+              },
+              {
+                "timestamp": "2026-03-01T08:04:00.000Z",
+                "severity": "ERROR",
+                "message": "ElevenLabs API still returning 429. Quota exhausted for today."
+              }
+            ]
+          }
+        ],
+        "deployments": [
+          {
+            "name": "elevenlabs-tts",
+            "desired_replicas": 1,
+            "ready_replicas": 1,
+            "image": "acrwarroomprod.azurecr.io/elevenlabs-tts:0.2.0",
+            "last_deployed": "2026-02-28T14:00:00Z"
+          }
+        ]
+      },
+      "agent-backup": {
+        "pods": [
+          {
+            "name": "livekit-agent-backup-5c8a2b-r9klm",
+            "status": "Running",
+            "restarts": 2,
+            "container": {
+              "name": "livekit-agent",
+              "image": "acrwarroomprod.azurecr.io/livekit-agent:0.1.0",
+              "cpu_request": "500m",
+              "cpu_limit": "1000m",
+              "memory_request": "1Gi",
+              "memory_limit": "2Gi"
+            },
+            "logs": [
+              {
+                "timestamp": "2026-03-01T07:45:00.000Z",
+                "severity": "INFO",
+                "message": "Backup livekit-agent replica started (AKS failover node)"
+              },
+              {
+                "timestamp": "2026-03-01T07:50:00.000Z",
+                "severity": "ERROR",
+                "message": "OOMKilled: container exceeded 2Gi memory limit during large transcript processing"
+              },
+              {
+                "timestamp": "2026-03-01T07:50:05.000Z",
+                "severity": "INFO",
+                "message": "Pod restarted by kubelet (restart #1)"
+              },
+              {
+                "timestamp": "2026-03-01T07:55:00.000Z",
+                "severity": "ERROR",
+                "message": "OOMKilled again: same memory issue. Possible memory leak in transcript buffer."
+              },
+              {
+                "timestamp": "2026-03-01T07:55:05.000Z",
+                "severity": "INFO",
+                "message": "Pod restarted by kubelet (restart #2)"
+              },
+              {
+                "timestamp": "2026-03-01T08:00:00.000Z",
+                "severity": "INFO",
+                "message": "Pod stable. Memory usage: 1.2Gi / 2Gi (60%)."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "application_insights": {
+    "component": "war-room-dashboard-frontend",
+    "telemetry": [
+      {
+        "timestamp": "2026-03-01T08:05:00.000Z",
+        "type": "pageView",
+        "name": "IncidentDashboard",
+        "duration_ms": 1234,
+        "success": true,
+        "client_ip": "192.168.1.100",
+        "browser": "Chrome 122"
+      },
+      {
+        "timestamp": "2026-03-01T08:05:30.000Z",
+        "type": "request",
+        "name": "GET /api/sessions",
+        "duration_ms": 45,
+        "success": true,
+        "response_code": 200
+      },
+      {
+        "timestamp": "2026-03-01T08:06:00.000Z",
+        "type": "exception",
+        "exception": "WebSocketConnectionError",
+        "message": "WebSocket connection to ws://localhost:8080/api/stream failed after 3 retries",
+        "severity": "error",
+        "count": 3
+      }
+    ]
+  },
+  "azure_monitor_queries": {
+    "example_kql": "AzureDiagnostics | where ResourceType == 'MANAGEDCLUSTERS' | where Category == 'kube-audit' | where log_s contains 'OOMKilled' | project TimeGenerated, log_s | order by TimeGenerated desc | limit 50"
+  }
+}

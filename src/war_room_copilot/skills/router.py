@@ -36,8 +36,12 @@ You MUST pick from this list — no other values are allowed:
 find the cause. E.g. "why is the API returning 500s?", "what caused the spike?"
 - **ideate**: Brainstorming solutions, "what should we do", weighing options, \
 trade-offs, mitigation strategies. E.g. "should we rollback or hotfix?"
-- **investigate**: Proactively look something up in code, commits, PRs, or files. \
-E.g. "check the last deploy", "what changed in the auth service?", "look at the logs"
+- **investigate**: Proactively look something up OR take an action using tools — \
+monitoring, logs, code, commits, PRs, files, service health, runbooks, \
+OR write actions like creating GitHub issues, reverting commits, creating PRs. \
+E.g. "check the last deploy", "what changed in auth?", "look at the logs", \
+"check Datadog APM", "what's the runbook for X", "create a GitHub issue", \
+"revert commit", "what are the dependencies for backboard-gateway?"
 - **recall**: Asking about past decisions, previous incidents, history. \
 E.g. "what did we decide last time?", "have we seen this before?"
 - **summarize**: Status updates, recaps, catch-ups, "what's going on", \
