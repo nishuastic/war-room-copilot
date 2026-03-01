@@ -59,6 +59,8 @@ from ..config import (
 from ..memory import DecisionTracker, IncidentDB, LongTermMemory, ShortTermMemory
 from ..models import SpeakerMetadata, TranscriptSegment
 from ..skills import SKILL_PROMPTS, SkillResult, SkillRouter
+from ..skills.investigation import run_investigation
+from ..skills.models import Skill
 from ..tools.github import (
     get_blame,
     get_commit_diff,
@@ -248,6 +250,9 @@ class WarRoomAgent(Agent):
         self._wake_buffer: list[str] = []
         self._wake_buffer_speaker: str = ""
         self._wake_buffer_timer: asyncio.Task[None] | None = None
+        # Async investigation state
+        self._pending_investigation: str | None = None
+        self._investigation_task: asyncio.Task[None] | None = None
 
     async def _run_silent_skill(
         self, context: str, user_message: str, skill_result: SkillResult
@@ -283,6 +288,28 @@ class WarRoomAgent(Agent):
             logger.info("Silent skill (%s) response written to trace", skill_result.skill.value)
         except Exception:
             logger.exception("Silent skill failed for %s", skill_result.skill.value)
+
+    async def _run_investigation_background(self, context: str, user_message: str) -> None:
+        """Run a GitHub investigation asynchronously and notify when done."""
+        logger.info("Background investigation started for: %s", user_message)
+        try:
+            result = await run_investigation(context, user_message)
+            self._pending_investigation = result
+            logger.info("Background investigation complete (%d chars)", len(result))
+            self.session.say(
+                "Done investigating. Let me know when you want me to share my findings."
+            )
+        except Exception:
+            logger.exception("Background investigation failed")
+            self._pending_investigation = (
+                "The investigation ran into an error. Try asking me again."
+            )
+            try:
+                self.session.say(
+                    "I hit an issue during investigation. Ask me again for what I found."
+                )
+            except Exception:
+                pass
 
     def _process_transcript(self, raw_text: str) -> list[TranscriptSegment]:
         """Log, store, and track all transcript segments. Returns parsed segments."""
@@ -364,6 +391,26 @@ class WarRoomAgent(Agent):
 
         logger.info("Wake buffer flushed: '%s'", combined_text)
 
+        # --- Deliver pending investigation result if one is ready ---
+        if self._pending_investigation is not None:
+            result = self._pending_investigation
+            self._pending_investigation = None
+            logger.info("Delivering pending investigation result (%d chars)", len(result))
+            try:
+                await self.session.say(result)
+            except Exception:
+                logger.exception("Failed to deliver investigation result")
+            return
+
+        # --- Notify if investigation is still running ---
+        if self._investigation_task is not None and not self._investigation_task.done():
+            logger.info("Investigation still running — notifying user")
+            try:
+                self.session.say("Still on it, I'll let you know when I'm done.")
+            except Exception:
+                pass
+            return
+
         # --- Skill routing ---
         await self.update_instructions(self._base_instructions)
 
@@ -392,7 +439,19 @@ class WarRoomAgent(Agent):
             asyncio.create_task(self._run_silent_skill(context, combined_text, skill_result))
             return
 
-        # High confidence — apply skill prompt and generate reply via session
+        # --- INVESTIGATE: say "on it", then run in background ---
+        if skill_result.skill == Skill.INVESTIGATE:
+            logger.info("Investigate skill — starting background task for: %s", combined_text)
+            try:
+                await self.session.say("On it, give me a moment to dig into this.")
+            except Exception:
+                logger.exception("Failed to say 'on it'")
+            self._investigation_task = asyncio.create_task(
+                self._run_investigation_background(context, combined_text)
+            )
+            return
+
+        # --- All other skills: apply skill prompt and generate reply ---
         skill_prompt = SKILL_PROMPTS.get(skill_result.skill, "")
         if skill_prompt:
             await self.update_instructions(self._base_instructions + skill_prompt)
