@@ -43,6 +43,7 @@ from ..config import (
     VOICEPRINT_CAPTURE_INTERVAL,
     VOICEPRINT_INITIAL_DELAY,
     WAKE_WORD,
+    WAKE_WORD_BUFFER,
 )
 from ..memory import DecisionTracker, IncidentDB, LongTermMemory, ShortTermMemory
 from ..models import SpeakerMetadata, TranscriptSegment
@@ -184,6 +185,10 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
         self._long_term = long_term
         self._router = router
         self._wake_ts: float | None = None
+        # Wake word sentence buffer — collects segments for WAKE_WORD_BUFFER seconds
+        self._wake_buffer: list[str] = []
+        self._wake_buffer_speaker: str = ""
+        self._wake_buffer_timer: asyncio.Task[None] | None = None
 
     async def _run_silent_skill(
         self, context: str, user_message: str, skill_result: SkillResult
@@ -239,6 +244,12 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
         if self._decision_tracker is not None:
             asyncio.create_task(self._decision_tracker.check_for_decision(segment))
 
+        # If buffer is active, append this segment's text (continuation of wake word sentence)
+        if self._wake_buffer_timer is not None and not self._wake_buffer_timer.done():
+            self._wake_buffer.append(segment.text)
+            logger.info("Wake buffer: appended '%s'", segment.text)
+            raise StopResponse()
+
         # Wake word check
         if WAKE_WORD not in segment.text.lower():
             raise StopResponse()
@@ -253,12 +264,29 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
             )
         )
 
+        # Start sentence buffer — wait for continuation segments before routing
+        self._wake_buffer = [segment.text]
+        self._wake_buffer_speaker = segment.speaker_id
+        self._wake_buffer_timer = asyncio.create_task(self._flush_wake_buffer())
+        logger.info("Wake buffer: started (%.2fs window)", WAKE_WORD_BUFFER)
+        raise StopResponse()
+
+    async def _flush_wake_buffer(self) -> None:
+        """Wait for the buffer window, then route and process the combined text."""
+        await asyncio.sleep(WAKE_WORD_BUFFER)
+
+        combined_text = " ".join(self._wake_buffer)
+        speaker = self._wake_buffer_speaker
+        self._wake_buffer = []
+        self._wake_buffer_speaker = ""
+
+        logger.info("Wake buffer flushed: '%s'", combined_text)
+
         # --- Skill routing ---
-        # Reset instructions to base before classification
         await self.update_instructions(self._base_instructions)
 
         context = self._memory.format_context()
-        skill_result = await self._router.classify(context, segment.text)
+        skill_result = await self._router.classify(context, combined_text)
 
         # Log skill route trace
         asyncio.create_task(
@@ -269,35 +297,27 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
                     "skill": skill_result.skill.value,
                     "confidence": skill_result.confidence,
                     "reasoning": skill_result.reasoning,
-                    "text": segment.text,
+                    "text": combined_text,
                 },
             )
         )
 
         # Confidence gating
         if skill_result.confidence < CONFIDENCE_DASHBOARD:
-            # Low confidence — discard silently
-
-            raise StopResponse()
+            return
 
         if skill_result.confidence < CONFIDENCE_SPEAK:
-            # Medium confidence — run skill silently, push to dashboard
-            asyncio.create_task(self._run_silent_skill(context, segment.text, skill_result))
+            asyncio.create_task(self._run_silent_skill(context, combined_text, skill_result))
+            return
 
-            raise StopResponse()
-
-        # High confidence — apply skill prompt and let pipeline proceed
+        # High confidence — apply skill prompt and generate reply via session
         skill_prompt = SKILL_PROMPTS.get(skill_result.skill, "")
         if skill_prompt:
             await self.update_instructions(self._base_instructions + skill_prompt)
 
-        # Inject buffered context
-        if context:
-            turn_ctx.add_message(
-                role="user",
-                content=f"[Recent conversation context]\n{context}",
-            )
-
+        await self.session.generate_reply(
+            user_input=f"[{speaker}] {combined_text}",
+        )
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:

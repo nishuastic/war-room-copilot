@@ -33,6 +33,7 @@ VOICEPRINT_INITIAL_DELAY = 15  # seconds
 
 # Wake word
 WAKE_WORD = "sam"
+WAKE_WORD_BUFFER = 0.75  # seconds to buffer after wake word for sentence completion
 
 # File paths
 DATA_DIR = PROJECT_ROOT / ".data"

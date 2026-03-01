@@ -27,7 +27,7 @@ echo ""
 
 # 1. LiveKit server (must start first)
 echo -e "${RED}[livekit]${NC}  Starting LiveKit server..."
-livekit-server --dev --bind 0.0.0.0 2>&1 | sed "s/^/$(printf "${RED}[livekit]${NC} ")/" &
+livekit-server --config .data/livekit-dev.yaml 2>&1 | grep -v "^$" | sed "s/^/$(printf "${RED}[livekit]${NC} ")/" &
 PIDS+=($!)
 sleep 2
 
