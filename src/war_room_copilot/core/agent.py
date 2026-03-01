@@ -11,6 +11,11 @@ import time
 from typing import Any
 
 from dotenv import load_dotenv
+
+# Silence noisy livekit debug logs
+for _lk_logger_name in ("livekit", "livekit.agents", "livekit.rtc"):
+    logging.getLogger(_lk_logger_name).setLevel(logging.WARNING)
+
 from livekit import agents
 from livekit.agents import Agent, AgentSession, RoomInputOptions, StopResponse, llm
 from livekit.plugins import elevenlabs, openai, silero, speechmatics
@@ -272,13 +277,13 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
         # Confidence gating
         if skill_result.confidence < CONFIDENCE_DASHBOARD:
             # Low confidence — discard silently
-            self._memory.clear()
+
             raise StopResponse()
 
         if skill_result.confidence < CONFIDENCE_SPEAK:
             # Medium confidence — run skill silently, push to dashboard
             asyncio.create_task(self._run_silent_skill(context, segment.text, skill_result))
-            self._memory.clear()
+
             raise StopResponse()
 
         # High confidence — apply skill prompt and let pipeline proceed
@@ -292,7 +297,7 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
                 role="user",
                 content=f"[Recent conversation context]\n{context}",
             )
-            self._memory.clear()
+
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:
