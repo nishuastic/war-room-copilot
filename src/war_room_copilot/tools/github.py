@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from itertools import islice
 
 from github import Auth, Github
 from livekit.agents import ToolError, function_tool
 
-from ..config import GITHUB_ALLOWED_REPOS, GITHUB_COMMIT_MSG_TRUNCATE, GITHUB_RESULT_LIMIT
+from ..config import (
+    GITHUB_ALLOWED_REPOS,
+    GITHUB_COMMIT_MSG_TRUNCATE,
+    GITHUB_RESULT_LIMIT,
+    GITHUB_REVERT_AUTO_MERGE,
+)
 from ._util import run_github
 
 
@@ -42,7 +48,7 @@ async def search_code(query: str, repo: str | None = None) -> str:
         full_query = f"{query} repo:{repo_name}"
         results = g.search_code(full_query)
         lines: list[str] = []
-        for item in results[:GITHUB_RESULT_LIMIT]:  # type: ignore[var-annotated]
+        for item in islice(results, GITHUB_RESULT_LIMIT):
             lines.append(f"- {item.path} (score: {item.score})")
         if not lines:
             return "No results found."
@@ -59,9 +65,9 @@ async def get_recent_commits(repo: str | None = None, branch: str = "main", coun
 
     def _inner() -> str:
         r = g.get_repo(repo_name)
-        commits = r.get_commits(sha=branch)[:count]
+        commits = r.get_commits(sha=branch)
         lines: list[str] = []
-        for c in commits:  # type: ignore[var-annotated]
+        for c in islice(commits, count):
             sha = c.sha[:7]
             msg = (c.commit.message.split("\n")[0])[:GITHUB_COMMIT_MSG_TRUNCATE]
             author = c.commit.author.name if c.commit.author else "unknown"
@@ -108,9 +114,9 @@ async def list_pull_requests(
 
     def _inner() -> str:
         r = g.get_repo(repo_name)
-        prs = r.get_pulls(state=state, sort="updated", direction="desc")[:count]
+        prs = r.get_pulls(state=state, sort="updated", direction="desc")
         lines: list[str] = []
-        for pr in prs:  # type: ignore[var-annotated]
+        for pr in islice(prs, count):
             merged = " [MERGED]" if pr.merged else ""
             author = pr.user.login if pr.user else "unknown"
             lines.append(f"- #{pr.number} {pr.title}{merged} by {author}")
@@ -129,7 +135,7 @@ async def search_issues(query: str, repo: str | None = None) -> str:
         full_query = f"{query} repo:{repo_name}"
         results = g.search_issues(full_query)
         lines: list[str] = []
-        for issue in results[:GITHUB_RESULT_LIMIT]:  # type: ignore[var-annotated]
+        for issue in islice(results, GITHUB_RESULT_LIMIT):
             state = issue.state
             lines.append(f"- #{issue.number} [{state}] {issue.title}")
         return "\n".join(lines) if lines else "No issues found."
@@ -163,9 +169,9 @@ async def get_blame(path: str, repo: str | None = None) -> str:
     def _inner() -> str:
         r = g.get_repo(repo_name)
         # PyGitHub doesn't have a direct blame API; use commits on the file
-        commits = r.get_commits(path=path)[:GITHUB_RESULT_LIMIT]
+        commits = r.get_commits(path=path)
         lines: list[str] = [f"Recent commits touching {path}:"]
-        for c in commits:  # type: ignore[var-annotated]
+        for c in islice(commits, GITHUB_RESULT_LIMIT):
             sha = c.sha[:7]
             msg = (c.commit.message.split("\n")[0])[:60]
             author = c.commit.author.name if c.commit.author else "unknown"
@@ -218,9 +224,12 @@ async def create_github_issue(
 
 @function_tool()
 async def revert_commit(commit_sha: str, repo: str | None = None) -> str:
-    """Create a revert PR for a given commit SHA.
+    """Revert a commit via the GitHub API.
 
-    Opens a new branch named 'revert-<sha>' and creates a pull request to revert the commit.
+    If the commit is HEAD of the default branch, creates a revert commit using
+    the Git Data API, opens a PR, and auto-merges it. For non-HEAD commits,
+    opens a PR with manual revert instructions.
+
     Requires GitHub token with 'repo' scope.
 
     Args:
@@ -231,48 +240,125 @@ async def revert_commit(commit_sha: str, repo: str | None = None) -> str:
     g = _get_github_client()
 
     def _revert() -> str:
+        from github import GithubException  # noqa: F811
 
         r = g.get_repo(repo_name)
-        # Resolve abbreviated SHA to full
+
+        # 1. Resolve commit and validate
         commit = r.get_commit(commit_sha)
         full_sha = commit.sha
         short_sha = full_sha[:7]
         commit_msg = commit.commit.message.split("\n")[0][:60]
 
-        # Create revert branch from default branch
+        parents = commit.commit.parents
+        if len(parents) > 1:
+            raise ToolError(
+                f"Commit {short_sha} is a merge commit. "
+                "Automatic revert isn't supported — "
+                "please revert the individual feature commits instead."
+            )
+        if not parents:
+            raise ToolError(f"Commit {short_sha} has no parent — cannot revert a root commit.")
+
+        # 2. Check for existing revert branch / PR
         default_branch = r.default_branch
-        base_ref = r.get_branch(default_branch)
         branch_name = f"revert-{short_sha}"
 
-        # Create branch
-        r.create_git_ref(ref=f"refs/heads/{branch_name}", sha=base_ref.commit.sha)
+        branch_existed = False
+        try:
+            r.get_git_ref(f"heads/{branch_name}")
+            branch_existed = True
+        except GithubException:
+            pass
 
-        # Create an empty revert commit (note: GitHub API doesn't do git revert natively;
-        # this creates a PR with instructions for the engineer to complete the revert)
-        pr_body = (
-            f"## Revert: {commit_msg}\n\n"
-            f"This PR reverts commit `{short_sha}` ({full_sha}).\n\n"
-            f"**To complete the revert**, run locally:\n"
-            f"```bash\n"
-            f"git fetch origin\n"
-            f"git checkout {branch_name}\n"
-            f"git revert {full_sha} --no-edit\n"
-            f"git push origin {branch_name}\n"
-            f"```\n\n"
-            f"Branch `{branch_name}` has been created from `{default_branch}` head."
-        )
+        if branch_existed:
+            # Check for an existing open PR on this branch
+            open_prs = list(r.get_pulls(state="open", head=f"{r.owner.login}:{branch_name}"))
+            if open_prs:
+                pr = open_prs[0]
+                return f"A revert PR already exists: PR #{pr.number} at {pr.html_url}."
+            # Stale branch with no open PR — delete it
+            r.get_git_ref(f"heads/{branch_name}").delete()
 
-        pr = r.create_pull(
-            title=f"Revert: {commit_msg} ({short_sha})",
-            body=pr_body,
-            head=branch_name,
-            base=default_branch,
-        )
-        return (
-            f"Revert PR #{pr.number} created: {pr.html_url}\n"
-            f"Branch '{branch_name}' ready. "
-            "Follow the instructions in the PR to complete the revert."
-        )
+        # 3. Create branch from default branch HEAD
+        head_ref = r.get_branch(default_branch)
+        head_sha = head_ref.commit.sha
+        branch_ref = r.create_git_ref(ref=f"refs/heads/{branch_name}", sha=head_sha)
+
+        try:
+            # 4. Check if commit is HEAD of default branch
+            is_head = full_sha == head_sha
+
+            if is_head:
+                # Create revert commit using parent's tree
+                parent_tree_sha = parents[0].sha
+                parent_tree = r.get_git_commit(parent_tree_sha).tree
+
+                revert_commit_obj = r.create_git_commit(
+                    message=f'Revert "{commit_msg}"\n\nThis reverts commit {full_sha}.',
+                    tree=parent_tree,
+                    parents=[r.get_git_commit(head_sha)],
+                )
+
+                # Update branch ref to point to the revert commit
+                branch_ref.edit(sha=revert_commit_obj.sha)
+
+                # Create PR
+                pr = r.create_pull(
+                    title=f"Revert: {commit_msg} ({short_sha})",
+                    body=(
+                        f"## Revert: {commit_msg}\n\n"
+                        f"This PR reverts commit `{short_sha}` ({full_sha}).\n\n"
+                        f"Revert commit created automatically via Git Data API."
+                    ),
+                    head=branch_name,
+                    base=default_branch,
+                )
+
+                # Auto-merge if configured
+                if GITHUB_REVERT_AUTO_MERGE:
+                    pr.merge(merge_method="squash")
+                    # Clean up branch after successful merge
+                    try:
+                        r.get_git_ref(f"heads/{branch_name}").delete()
+                    except GithubException:
+                        pass  # Branch may already be deleted by GitHub
+
+                return f"Revert PR #{pr.number} created and merged: {pr.html_url}"
+
+            else:
+                # Non-HEAD commit — create PR with manual instructions
+                pr_body = (
+                    f"## Revert: {commit_msg}\n\n"
+                    f"This PR reverts commit `{short_sha}` ({full_sha}).\n\n"
+                    f"Commit `{short_sha}` isn't the latest on `{default_branch}`, "
+                    f"so the revert must be completed manually.\n\n"
+                    f"**To complete the revert**, run locally:\n"
+                    f"```bash\n"
+                    f"git fetch origin\n"
+                    f"git checkout {branch_name}\n"
+                    f"git revert {full_sha} --no-edit\n"
+                    f"git push origin {branch_name}\n"
+                    f"```\n"
+                )
+                pr = r.create_pull(
+                    title=f"Revert: {commit_msg} ({short_sha})",
+                    body=pr_body,
+                    head=branch_name,
+                    base=default_branch,
+                )
+                return (
+                    f"Revert PR #{pr.number} created but commit {short_sha} isn't the latest, "
+                    f"so an engineer needs to complete the revert on the branch. {pr.html_url}"
+                )
+
+        except Exception:
+            # Clean up branch on any failure after creation
+            try:
+                r.get_git_ref(f"heads/{branch_name}").delete()
+            except GithubException:
+                pass
+            raise
 
     return await run_github(_revert)
 

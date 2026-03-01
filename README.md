@@ -151,27 +151,21 @@ Skip steps 7–8. Console mode uses your Mac's mic and speakers directly — no 
 uv run python -m src.war_room_copilot.core.agent console
 ```
 
-## Architecture
+## How It Works
 
-```
-LiveKit Room → Speechmatics STT (diarization + speaker ID + custom vocab) → GPT-4.1-mini (+ GitHub tools) → Speechmatics TTS → LiveKit Room
-```
+- Engineer speaks in a LiveKit room
+- Speechmatics STT transcribes with speaker diarization and custom vocabulary
+- Wake word **"sam"** triggers the AI pipeline
+- Skill Router (GPT-4.1-nano) classifies intent; confidence gating decides speak / silent push / discard
+- GPT-4.1-mini reasons about the incident and calls tools (GitHub, Datadog, cloud logs, runbooks)
+- Speechmatics TTS speaks the response back into the room
+- Dashboard shows live transcript, decisions, and agent trace in real time
 
-Stage 1 adds incident reasoning, custom STT dictionary, centralized config, and a wake word (`"sam"`). Stage 2 adds **GitHub tools** (search code, commits, PRs, files, blame) via PyGitHub and upgrades the LLM to **GPT-4.1-mini**. Stage 3 adds **memory and decision tracking** — structured short-term transcript memory, Backboard.io for cross-session recall, LLM-based decision detection, and SQLite persistence. Stage 6 adds a **real-time dashboard** — FastAPI REST + SSE server backed by SQLite WAL, and a React + Vite frontend showing live transcript, agent trace, incident timeline, and decisions. Stage 7 adds **skill routing** — a fast GPT-4.1-nano classifier routes each request to a specialized skill (debug, ideate, investigate, recall, summarize, general) with confidence gating that controls whether the agent speaks aloud, silently pushes insights to the dashboard, or discards low-confidence results.
-
-See [docs/architecture.md](docs/architecture.md) for details.
+See [docs/architecture.md](docs/architecture.md) for the full system diagram and component details.
 
 ## Dashboard
 
-The dashboard is a read-only observability layer — watch the incident unfold in real time without interrupting the voice flow.
-
-### Start the API server (Terminal 4)
-
-```bash
-uv run python -m src.war_room_copilot.api.main
-```
-
-Starts FastAPI on `http://localhost:8000`. Endpoints:
+Read-only observability layer — watch the incident unfold without interrupting the voice flow. Start it with `make dev` (included automatically) or manually with steps 5-6 above.
 
 | Endpoint | Description |
 |----------|-------------|
@@ -182,13 +176,7 @@ Starts FastAPI on `http://localhost:8000`. Endpoints:
 | `GET /sessions/{id}/trace` | SSE — agent trace (wake word, tool calls, LLM responses) |
 | `GET /sessions/latest/id` | Most recent session ID |
 
-### Start the dashboard (Terminal 5)
-
-```bash
-cd frontend && npm install && npm run dev
-```
-
-Opens `http://localhost:5173`. The dashboard auto-connects to the most recent active session. Switch between **Transcript**, **Timeline**, **Agent Trace**, and **Decisions** tabs.
+Tabs: **Transcript**, **Timeline**, **Agent Trace**, **Decisions**.
 
 ## Project Structure
 

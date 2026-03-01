@@ -84,6 +84,7 @@
     {"content": "503", "sounds_like": ["five oh three", "service unavailable"]},
     {"content": "commit SHA", "sounds_like": ["commit sha", "git SHA", "SHA hash"]},
     {"content": "pull request", "sounds_like": ["PR", "P R"]},
+    {"content": "commit"},
     {"content": "revert"},
     {"content": "backboard-gateway", "sounds_like": ["backboard gateway", "back board gateway"]},
     {"content": "livekit-agent", "sounds_like": ["livekit agent", "live kit agent"]},
@@ -105,6 +106,8 @@
     {"content": "war_room", "sounds_like": ["war room", "warroom"]},
     {"content": "stt", "sounds_like": ["S T T", "speech to text namespace"]},
     {"content": "p0", "sounds_like": ["P zero", "priority zero", "P 0"]},
-    {"content": "p1", "sounds_like": ["P one", "priority one", "P 1"]}
+    {"content": "p1", "sounds_like": ["P one", "priority one", "P 1"]},
+    {"content": "Sam", "sounds_like": ["sam", "saam", "sahm"]},
+    {"content": "sec", "sounds_like": ["second", "sek"]}
   ]
 }

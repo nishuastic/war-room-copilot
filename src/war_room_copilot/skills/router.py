@@ -22,7 +22,7 @@ Given the recent conversation context and the user's message, do two things:
 Set "addressed_to_assistant" to true when the user is speaking TO Sam in any way — \
 asking Sam to do something, requesting information, greeting Sam, saying Sam's name \
 to get attention, or any message where Sam is the intended listener. \
-Examples of addressed=true: "Sam, how are you?", "hey Sam", "Sam what happened?", \
+Examples of addressed=true: "Sam, how are you?", "hey Sam", "Sam?", "Sam what happened?", \
 "my boy Sam, how are you?", "Sam.", "yo Sam can you check the logs?" \
 Set it to false ONLY when "Sam" is mentioned as a third person in conversation \
 with other humans — talking ABOUT Sam, not TO Sam. \
@@ -47,7 +47,12 @@ E.g. "check the last deploy", "what changed in auth?", "look at the logs", \
 - **recall**: Asking about past decisions, previous incidents, history. \
 E.g. "what did we decide last time?", "have we seen this before?"
 - **general**: Greetings, acknowledgements, thanks, off-topic, or unclear intent. \
-E.g. "hey Sam", "ok thanks", "got it"
+E.g. "ok thanks", "got it"
+
+IMPORTANT: When the user says ONLY "Sam?" or "Sam" or "hey Sam" with no other content, \
+this is an attention call — they want Sam to respond to the most recent conversation context. \
+Classify as "investigate" with high confidence so Sam can look at what was just discussed \
+and respond.
 
 Respond with JSON only:
 {"addressed_to_assistant": <true or false>, \
@@ -126,18 +131,18 @@ class SkillRouter:
 
         except asyncio.TimeoutError:
             logger.warning(
-                "Skill router timed out after %.1fs — defaulting to GENERAL",
+                "Skill router timed out after %.1fs — staying silent",
                 ROUTER_TIMEOUT,
             )
             return SkillResult(
                 skill=Skill.GENERAL,
-                confidence=1.0,
-                reasoning="Router timeout",
+                confidence=0.0,
+                reasoning="Router timeout — staying silent",
             )
         except Exception:
-            logger.exception("Skill router error — defaulting to GENERAL")
+            logger.exception("Skill router error — staying silent")
             return SkillResult(
                 skill=Skill.GENERAL,
-                confidence=1.0,
-                reasoning="Router error",
+                confidence=0.0,
+                reasoning="Router error — staying silent",
             )

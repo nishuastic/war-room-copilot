@@ -77,6 +77,56 @@ RESERVED_LABEL = re.compile(r"^S\d+$")
 SPEAKER_TAG = re.compile(r"<(\w+)>(.*?)</\1>", re.DOTALL)
 PASSIVE_WRAP = re.compile(r"<PASSIVE>(.*?)</PASSIVE>", re.DOTALL)
 
+_FILLER_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b(log|logs|logging)\b", re.I), "Pulling up the logs..."),
+    (
+        re.compile(r"\b(metric|metrics|latency|p99|p50|throughput)\b", re.I),
+        "Checking the metrics...",
+    ),
+    (
+        re.compile(r"\b(deploy|deployment|rollback|release)\b", re.I),
+        "Looking into that deployment...",
+    ),
+    (re.compile(r"\b(commit|commits|diff|blame|git)\b", re.I), "Checking the commit history..."),
+    (re.compile(r"\b(pr|pull request)\b", re.I), "Looking at the pull requests..."),
+    (re.compile(r"\b(datadog|monitor|apm|traces?)\b", re.I), "Checking Datadog..."),
+    (re.compile(r"\b(service|health|graph)\b", re.I), "Checking the service health..."),
+    (re.compile(r"\b(runbook|playbook)\b", re.I), "Looking up the runbook..."),
+    (re.compile(r"\b(error|errors|exception|bug|issue)\b", re.I), "Digging into that error..."),
+    (re.compile(r"\b(code|file|search)\b", re.I), "Searching the codebase..."),
+    (re.compile(r"\b(summary|recap|status|update)\b", re.I), "Putting together a summary..."),
+]
+
+_STILL_WORKING_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b(log|logs)\b", re.I), "Still pulling those logs, hang tight."),
+    (
+        re.compile(r"\b(metric|metrics|latency)\b", re.I),
+        "Still crunching the metrics, one more sec.",
+    ),
+    (
+        re.compile(r"\b(deploy|deployment)\b", re.I),
+        "Still checking that deployment, almost there.",
+    ),
+    (
+        re.compile(r"\b(datadog|monitor|apm)\b", re.I),
+        "Still digging through Datadog, almost there.",
+    ),
+]
+
+
+def _generate_filler_message(text: str) -> str:
+    for pattern, message in _FILLER_PATTERNS:
+        if pattern.search(text):
+            return message
+    return "On it, give me a sec..."
+
+
+def _generate_still_working_message(text: str) -> str:
+    for pattern, message in _STILL_WORKING_PATTERNS:
+        if pattern.search(text):
+            return message
+    return "Still working on it, almost there."
+
 
 def _log_transcript(raw: str) -> None:
     """Log each speaker's text using a per-speaker logger named ``transcript.<label>``."""
@@ -253,6 +303,9 @@ class WarRoomAgent(Agent):
         self._pending_result: str | None = None
         self._async_task: asyncio.Task[None] | None = None
         self._investigate_notified: bool = False
+        self._investigate_query: str = ""
+        self._user_state: str = "listening"
+        self._delivery_task: asyncio.Task[None] | None = None
         # Backboard LLM routing state for recall skill
         self._use_backboard_for_next_reply: bool = False
         self._recall_local_context: str = ""
@@ -337,8 +390,10 @@ class WarRoomAgent(Agent):
             result = await run_investigation(context, user_message)
             logger.info("Background investigate complete (%d chars)", len(result))
             if self._investigate_notified:
-                # Already told user we're working on it — park result for next wake word
-                self._pending_result = result
+                # Cancel any previous delivery task
+                if self._delivery_task and not self._delivery_task.done():
+                    self._delivery_task.cancel()
+                self._delivery_task = asyncio.create_task(self._deliver_when_silent(result))
             else:
                 # Fast result — deliver immediately
                 try:
@@ -348,6 +403,24 @@ class WarRoomAgent(Agent):
         except Exception:
             logger.exception("Background investigate failed")
             self._pending_result = "Hit an error on that one. Ask me again and I'll retry."
+
+    async def _deliver_when_silent(self, result: str, timeout: float = 30.0) -> None:
+        """Wait for room silence, then proactively deliver investigation results."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._user_state == "listening":
+                await asyncio.sleep(1.0)  # grace period
+                if self._user_state == "listening":
+                    try:
+                        await self.session.say(result)
+                        return
+                    except Exception:
+                        self._pending_result = result
+                        return
+            await asyncio.sleep(0.3)
+        # Timeout fallback — park for next wake word
+        logger.info("Silence timeout — parking result for next wake word")
+        self._pending_result = result
 
     def _process_transcript(self, raw_text: str) -> list[TranscriptSegment]:
         """Log, store, and track all transcript segments. Returns parsed segments."""
@@ -398,6 +471,19 @@ class WarRoomAgent(Agent):
         if wake_segment is None:
             raise StopResponse()
 
+        # Wake word detected — cancel any in-flight work so Sam shuts up
+        # and re-routes with the new input
+        if self._async_task and not self._async_task.done():
+            self._async_task.cancel()
+            logger.info("Cancelled in-flight async investigation (user interrupted)")
+        self._async_task = None
+        if self._delivery_task and not self._delivery_task.done():
+            self._delivery_task.cancel()
+            logger.info("Cancelled pending delivery task (user interrupted)")
+        self._delivery_task = None
+        self._pending_result = None
+        self._investigate_notified = False
+
         # Wake word detected — record timestamp for latency tracking
         self._wake_ts = time.time()
         asyncio.create_task(
@@ -429,7 +515,7 @@ class WarRoomAgent(Agent):
 
         logger.info("Wake buffer flushed: '%s'", combined_text)
 
-        # --- Deliver pending async result if one is ready ---
+        # --- Deliver pending async result, then continue to process the new input ---
         if self._pending_result is not None:
             result = self._pending_result
             self._pending_result = None
@@ -438,14 +524,14 @@ class WarRoomAgent(Agent):
                 await self.session.say(result)
             except Exception:
                 logger.exception("Failed to deliver async result")
-            return
+            # Fall through to route the new user input instead of returning
 
         # --- Notify if async task is still running ---
         if self._async_task is not None and not self._async_task.done():
             logger.info("Async skill still running — notifying user")
             self._investigate_notified = True
             try:
-                self.session.say("Still working on it.")
+                await self.session.say(_generate_still_working_message(self._investigate_query))
             except Exception:
                 pass
             return
@@ -487,13 +573,14 @@ class WarRoomAgent(Agent):
             self._async_task = asyncio.create_task(
                 self._run_async_skill_background(context, combined_text)
             )
+            self._investigate_query = combined_text
             # Wait up to 1s — if investigation finishes fast, result is delivered inline
             # If still running after 1s, tell user we're on it
             await asyncio.sleep(1.0)
             if self._async_task is not None and not self._async_task.done():
                 self._investigate_notified = True
                 try:
-                    self.session.say("On it, one sec.")
+                    await self.session.say(_generate_filler_message(combined_text))
                 except Exception:
                     pass
             return
@@ -767,6 +854,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             return
         # Delegate to agent's transcript processing (log + store + track)
         war_room_agent._process_transcript(raw_text)
+
+    @session.on("user_state_changed")
+    def _on_user_state_changed(ev: Any) -> None:
+        war_room_agent._user_state = ev.new_state
 
     async def capture_voiceprints() -> None:
         await asyncio.sleep(VOICEPRINT_INITIAL_DELAY)

@@ -36,7 +36,7 @@ LLM_MODEL = "gpt-4.1"
 
 # Skill router
 ROUTER_MODEL = "gpt-4.1-mini"
-ROUTER_TIMEOUT = 2.0  # seconds
+ROUTER_TIMEOUT = 3.5  # seconds
 CONFIDENCE_SPEAK = 0.7
 CONFIDENCE_DASHBOARD = 0.4
 
@@ -101,6 +101,7 @@ INVESTIGATION_CONTEXT_CHARS = 1500
 # GitHub
 GITHUB_RESULT_LIMIT = 10
 GITHUB_COMMIT_MSG_TRUNCATE = 80
+GITHUB_REVERT_AUTO_MERGE = True  # Auto-merge revert PRs (set False to require review)
 
 # Investigation
 MAX_INVESTIGATION_ROUNDS = 6

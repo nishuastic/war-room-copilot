@@ -56,7 +56,20 @@ async def run_investigation(
         },
     ]
 
+    failed_tools: dict[str, str] = {}  # tool_name -> last error message
+
     for round_num in range(MAX_INVESTIGATION_ROUNDS):
+        # Inject hint about previously failed tools so the LLM avoids repeating them
+        if failed_tools:
+            hint = "IMPORTANT: These tools already failed — do NOT call them with the same args:\n"
+            for tool_name, err in failed_tools.items():
+                hint += f"  - {tool_name}: {err}\n"
+            hint += (
+                "Try different arguments or a different tool instead. "
+                "If stuck, summarize what you found."
+            )
+            messages.append({"role": "system", "content": hint})
+
         response = await client.chat.completions.create(  # type: ignore[call-overload]
             model=model,
             messages=messages,
@@ -91,6 +104,12 @@ async def run_investigation(
             *[_call_tool(tc.id, tc.function.name, tc.function.arguments) for tc in msg.tool_calls]
         )
         messages.extend(tool_results)
+
+        # Track failures so we can warn the LLM on the next round
+        for tc, result in zip(msg.tool_calls, tool_results):
+            content = result.get("content", "")
+            if content.startswith("Tool error (") or content.startswith("Unknown tool:"):
+                failed_tools[f"{tc.function.name}({tc.function.arguments})"] = content[:200]
 
         logger.info(
             "Investigation round %d/%d: called %d tool(s): %s",
