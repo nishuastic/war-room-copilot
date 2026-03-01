@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -751,6 +752,21 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     tools: list[Any] = list(ALL_TOOLS.values())
 
+    # Wrap each tool so every invocation is logged to agent_trace
+    def _traced(tool: Any) -> Any:
+        original = tool._func
+        name = tool._info.name
+
+        @functools.wraps(original)
+        async def _wrapper(*args: Any, **kwargs: Any) -> Any:
+            asyncio.create_task(db.add_trace(session_id, "tool_call", {"tool": name}))
+            return await original(*args, **kwargs)
+
+        tool._func = _wrapper
+        return tool
+
+    tools = [_traced(t) for t in tools]
+
     session: AgentSession[Any] = AgentSession(
         stt=stt,
         llm=openai.LLM(model=LLM_MODEL),
@@ -787,55 +803,43 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         room_input_options=RoomInputOptions(),
     )
 
-    # Trace tool calls and LLM responses via session events
-    @session.on("function_tools_executed")
-    def _on_tools_executed(ev: Any) -> None:
-        asyncio.create_task(db.update_metrics(session_id, llm_calls=1))
-        for call, output in ev.zipped():
-            tool_name = getattr(call, "name", str(call))
-            raw_args = getattr(call, "arguments", {})
-            result_preview = str(getattr(output, "output", ""))[:300] if output else ""
-            logger.info("Tool call: %s(%s) → %s", tool_name, raw_args, result_preview[:100])
+    @session.on("conversation_item_added")  # type: ignore[arg-type]
+    def _on_agent_speech(ev: Any) -> None:
+        item = getattr(ev, "item", None)
+        if item is None:
+            return
+        # Only capture assistant (Sam) messages, not user turns
+        if getattr(item, "role", None) != "assistant":
+            return
+        text_str = (getattr(item, "text_content", None) or "")[:1000]
+        if not text_str:
+            return
+        # Compute latency from wake word to first agent speech
+        latency_ms = 0.0
+        if war_room_agent._wake_ts is not None:
+            latency_ms = (time.time() - war_room_agent._wake_ts) * 1000
+            war_room_agent._wake_ts = None
             asyncio.create_task(
                 db.add_trace(
                     session_id,
-                    "tool_call",
-                    {"tool": tool_name, "args": raw_args, "result": result_preview},
+                    "latency",
+                    {"ms": round(latency_ms, 1)},
                 )
             )
-
-    @session.on("agent_speech_committed")  # type: ignore[arg-type]
-    def _on_agent_speech(msg: Any) -> None:
-        text = getattr(msg, "content", None) or str(msg)
-        if text:
-            text_str = str(text)[:1000]
-            # Compute latency from wake word to first agent speech
-            latency_ms = 0.0
-            if war_room_agent._wake_ts is not None:
-                latency_ms = (time.time() - war_room_agent._wake_ts) * 1000
-                war_room_agent._wake_ts = None
-                asyncio.create_task(
-                    db.add_trace(
-                        session_id,
-                        "latency",
-                        {"ms": round(latency_ms, 1)},
-                    )
-                )
-            asyncio.create_task(db.add_trace(session_id, "llm_response", {"text": text_str}))
-            asyncio.create_task(
-                db.add_segment(
-                    session_id,
-                    TranscriptSegment(speaker_id="sam", text=text_str, timestamp=time.time()),
-                )
+        asyncio.create_task(db.add_trace(session_id, "llm_response", {"text": text_str}))
+        asyncio.create_task(
+            db.add_segment(
+                session_id,
+                TranscriptSegment(speaker_id="sam", text=text_str, timestamp=time.time()),
             )
-            # Track TTS chars for cost
-            asyncio.create_task(
-                db.update_metrics(
-                    session_id,
-                    tts_chars=len(text_str),
-                    latency_ms=latency_ms,
-                )
+        )
+        asyncio.create_task(
+            db.update_metrics(
+                session_id,
+                elevenlabs_chars=len(text_str),
+                latency_ms=latency_ms,
             )
+        )
 
     @session.on("user_input_transcribed")
     def _on_user_input_transcribed(ev: Any) -> None:

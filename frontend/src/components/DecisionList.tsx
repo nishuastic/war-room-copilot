@@ -43,46 +43,29 @@ export function DecisionList({ decisions }: Props) {
           <div
             key={d.id}
             style={{
-              borderRadius: 8,
+              borderRadius: 'var(--radius)',
               border: '1px solid var(--border)',
-              background: 'var(--surface-2)',
-              padding: '10px 12px',
-              transition: 'border-color 0.15s',
+              borderLeft: `3px solid ${color}`,
+              background: 'var(--surface)',
+              padding: '12px 14px',
+              boxShadow: 'var(--shadow-sm)',
+              animation: 'messageIn 0.3s ease-out',
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--border-2)')}
-            onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
           >
-            <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text-1)', lineHeight: 1.55, fontWeight: 500 }}>
+            <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--text-1)', lineHeight: 1.55, fontWeight: 500 }}>
               {d.text}
             </p>
 
-            {/* Confidence */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: d.context ? 6 : 8 }}>
-              <div style={{ flex: 1, height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
-                <div style={{
-                  width: `${pct}%`, height: '100%',
-                  background: `linear-gradient(90deg, ${color}, ${color}aa)`,
-                  borderRadius: 2, transition: 'width 0.6s ease',
-                }} />
-              </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <span style={{
                 fontSize: 11, fontWeight: 700, color,
                 background: confBg(d.confidence),
-                borderRadius: 4, padding: '1px 6px',
+                borderRadius: 20, padding: '2px 8px',
                 fontFamily: 'JetBrains Mono, monospace',
               }}>{pct}%</span>
-            </div>
-
-            {d.context && (
-              <p style={{ margin: '0 0 8px', fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
-                {d.context.slice(0, 120)}{d.context.length > 120 ? '…' : ''}
-              </p>
-            )}
-
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <span style={{
                 fontSize: 10, fontWeight: 600, color: 'var(--text-3)',
-                background: 'var(--surface)', border: '1px solid var(--border)',
+                background: 'var(--surface-2)', border: '1px solid var(--border)',
                 borderRadius: 4, padding: '1px 6px',
               }}>{d.speaker_id}</span>
               <span style={{ fontSize: 10, color: 'var(--text-4)', fontFamily: 'JetBrains Mono, monospace' }}>

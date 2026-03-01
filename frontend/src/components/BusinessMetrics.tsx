@@ -44,7 +44,7 @@ export function BusinessMetrics({ sessionId }: { sessionId: number }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
       {/* Top stat cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
         <MetricCard
           label="Session Cost"
           value={`$${data.cost_usd.toFixed(4)}`}
@@ -53,24 +53,17 @@ export function BusinessMetrics({ sessionId }: { sessionId: number }) {
           icon="💰"
         />
         <MetricCard
-          label="Carbon Footprint"
-          value={`${data.carbon_g.toFixed(1)} gCO₂`}
-          sub={`${data.llm_calls} LLM call${data.llm_calls !== 1 ? 's' : ''}`}
-          color="#10b981"
-          icon="🌱"
-        />
-        <MetricCard
           label="Avg Response Latency"
           value={data.avg_latency_ms > 0 ? `${Math.round(data.avg_latency_ms)} ms` : '—'}
           sub="wake-word → agent reply"
-          color="#8b5cf6"
+          color="var(--sam-from)"
           icon="⚡"
         />
         <MetricCard
-          label="Tokens Used"
-          value={(data.total_input_tokens + data.total_output_tokens).toLocaleString()}
-          sub={`${data.total_input_tokens.toLocaleString()} in · ${data.total_output_tokens.toLocaleString()} out`}
-          color="#f59e0b"
+          label="LLM Calls"
+          value={String(data.llm_calls)}
+          sub={`${data.total_input_tokens.toLocaleString()} in · ${data.total_output_tokens.toLocaleString()} out tokens`}
+          color="var(--yellow)"
           icon="🔢"
         />
       </div>
