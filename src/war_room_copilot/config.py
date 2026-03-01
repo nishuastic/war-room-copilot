@@ -19,12 +19,11 @@ SKILL_LLM_MODELS: dict[str, tuple[str, str]] = {
     "ideate": ("openai", "gpt-4.1"),
     "investigate": ("openai", "gpt-4.1"),
     "recall": ("openai", "gpt-4.1"),
-    "summarize": ("openai", "gpt-4.1"),
     "general": ("openai", "gpt-4.1"),
 }
 
 # TTS
-ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
+SPEECHMATICS_TTS_VOICE = "jack"  # Options: sarah (UK F), theo (UK M), megan (US F), jack (US M)
 
 # Speaker identification
 FOCUS_SPEAKERS: list[str] = ["S1"]
@@ -59,7 +58,7 @@ DB_FILE = DATA_DIR / "war_room.db"
 # Cost rates
 GPT4_MINI_INPUT_COST_PER_1K = 0.00015  # $0.15/1M tokens
 GPT4_MINI_OUTPUT_COST_PER_1K = 0.0006  # $0.60/1M tokens
-ELEVENLABS_COST_PER_CHAR = 0.000003  # rough estimate
+SPEECHMATICS_TTS_COST_PER_CHAR = 0.000011  # $0.011/1k chars
 CARBON_G_PER_LLM_CALL = 0.2  # ~0.2g CO2 per call
 
 # Runbooks

@@ -10,6 +10,12 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from ..config import LLM_MODEL
+from ..tools.datadog import (
+    get_datadog_monitors,
+    query_datadog_apm,
+    query_datadog_logs,
+    query_datadog_metrics,
+)
 from ..tools.github import (
     get_blame,
     get_commit_diff,
@@ -33,6 +39,10 @@ _TOOLS: dict[str, Any] = {
     "search_issues": search_issues,
     "read_file": read_file,
     "get_blame": get_blame,
+    "query_datadog_metrics": query_datadog_metrics,
+    "query_datadog_logs": query_datadog_logs,
+    "query_datadog_apm": query_datadog_apm,
+    "get_datadog_monitors": get_datadog_monitors,
 }
 
 _TOOL_SCHEMAS = [
@@ -144,12 +154,97 @@ _TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_datadog_metrics",
+            "description": "Query Datadog metrics API for a given metric over a time range.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "metric": {
+                        "type": "string",
+                        "description": "Metric name, e.g. 'system.cpu.user'",
+                    },
+                    "from_time": {
+                        "type": "string",
+                        "description": "Start time — '1h', '30m', or ISO8601",
+                    },
+                    "to_time": {
+                        "type": "string",
+                        "description": "End time — 'now' or ISO8601",
+                    },
+                },
+                "required": ["metric"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_datadog_logs",
+            "description": "Query Datadog Log Explorer for matching log entries.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Log search query, e.g. 'error timeout'",
+                    },
+                    "service": {
+                        "type": "string",
+                        "description": "Optional service name filter",
+                    },
+                    "minutes_ago": {
+                        "type": "integer",
+                        "description": "How far back to search (default 30)",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_datadog_apm",
+            "description": "Query Datadog APM for trace error rate and latency for a service.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "service": {
+                        "type": "string",
+                        "description": "Service name, e.g. 'backboard-gateway'",
+                    },
+                    "minutes_ago": {
+                        "type": "integer",
+                        "description": "Time window (default 30 min)",
+                    },
+                },
+                "required": ["service"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_datadog_monitors",
+            "description": "List all triggered (alerting or warning) Datadog monitors.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
 ]
 
 _SYSTEM_PROMPT = """\
 You are an investigator for a production incident war room.
-Use the available GitHub tools to thoroughly investigate the user's request.
-Chain multiple tool calls as needed — check commits, diffs, PRs, and code.
+Use the available tools to thoroughly investigate the user's request.
+You have access to GitHub tools (commits, diffs, PRs, code) AND Datadog tools \
+(APM traces, metrics, logs, monitors).
+Chain multiple tool calls as needed — check monitoring data, commits, diffs, and code.
 When you have enough evidence, return a concise but complete summary of your findings,
 suitable for being read aloud in a voice call. Lead with the most important finding.\
 """

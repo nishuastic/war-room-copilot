@@ -29,7 +29,7 @@ for _logger_name in (
 
 from livekit import agents
 from livekit.agents import Agent, AgentSession, RoomInputOptions, StopResponse, llm
-from livekit.plugins import elevenlabs, openai, silero, speechmatics
+from livekit.plugins import openai, silero, speechmatics
 from livekit.plugins.speechmatics import (
     AdditionalVocabEntry,
     OperatingPoint,
@@ -43,7 +43,6 @@ from ..config import (
     CONFIDENCE_SPEAK,
     DATA_DIR,
     DB_FILE,
-    ELEVENLABS_VOICE_ID,
     FOCUS_SPEAKERS,
     GITHUB_ALLOWED_REPOS,
     K8S_DICTIONARY_FILE,
@@ -51,6 +50,7 @@ from ..config import (
     SHORT_TERM_WINDOW_SIZE,
     SKILL_LLM_MODELS,
     SPEAKERS_FILE,
+    SPEECHMATICS_TTS_VOICE,
     VOICEPRINT_CAPTURE_INTERVAL,
     VOICEPRINT_INITIAL_DELAY,
     WAKE_WORD,
@@ -61,7 +61,6 @@ from ..models import SpeakerMetadata, TranscriptSegment
 from ..skills import SKILL_PROMPTS, SkillResult, SkillRouter
 from ..skills.investigation import run_investigation
 from ..skills.models import Skill
-from ..skills.summarization import run_summarization
 from ..tools.datadog import (
     get_datadog_monitors,
     query_datadog_apm,
@@ -271,7 +270,7 @@ class WarRoomAgent(Agent):
         self._wake_buffer: list[str] = []
         self._wake_buffer_speaker: str = ""
         self._wake_buffer_timer: asyncio.Task[None] | None = None
-        # Async background skill state (investigate / summarize)
+        # Async background skill state (investigate)
         self._pending_result: str | None = None
         self._async_task: asyncio.Task[None] | None = None
 
@@ -310,30 +309,22 @@ class WarRoomAgent(Agent):
         except Exception:
             logger.exception("Silent skill failed for %s", skill_result.skill.value)
 
-    async def _run_async_skill_background(
-        self, skill: Skill, context: str, user_message: str
-    ) -> None:
-        """Run investigate or summarize asynchronously and notify when done."""
-        logger.info("Background %s started for: %s", skill.value, user_message)
+    async def _run_async_skill_background(self, context: str, user_message: str) -> None:
+        """Run investigate asynchronously and notify when done."""
+        logger.info("Background investigate started for: %s", user_message)
         try:
-            if skill == Skill.INVESTIGATE:
-                result = await run_investigation(context, user_message)
-                done_phrase = (
-                    "Done investigating. Let me know when you want me to share my findings."
-                )
-            else:  # SUMMARIZE
-                result = await run_summarization(context, user_message)
-                done_phrase = "Done. Let me know when you want me to share the summary."
-
+            result = await run_investigation(context, user_message)
             self._pending_result = result
-            logger.info("Background %s complete (%d chars)", skill.value, len(result))
-            self.session.say(done_phrase)
+            logger.info("Background investigate complete (%d chars)", len(result))
+            self.session.say(
+                "Done investigating. Let me know when you want me to share my findings."
+            )
         except Exception:
-            logger.exception("Background %s failed", skill.value)
-            self._pending_result = f"The {skill.value} ran into an error. Try asking me again."
+            logger.exception("Background investigate failed")
+            self._pending_result = "The investigation ran into an error. Try asking me again."
             try:
                 self.session.say(
-                    f"I hit an issue during the {skill.value}. Ask me again for what I found."
+                    "I hit an issue during the investigation. Ask me again for what I found."
                 )
             except Exception:
                 pass
@@ -466,24 +457,18 @@ class WarRoomAgent(Agent):
             asyncio.create_task(self._run_silent_skill(context, combined_text, skill_result))
             return
 
-        # --- INVESTIGATE / SUMMARIZE: say "on it", then run in background ---
-        async_skill_phrases = {
-            Skill.INVESTIGATE: "On it, give me a moment to dig into this.",
-            Skill.SUMMARIZE: "On it, give me a moment to pull that together.",
-        }
-        if skill_result.skill in async_skill_phrases:
-            on_it_phrase = async_skill_phrases[skill_result.skill]
+        # --- INVESTIGATE: say "on it", then run in background ---
+        if skill_result.skill == Skill.INVESTIGATE:
             logger.info(
-                "%s skill — starting background task for: %s",
-                skill_result.skill.value,
+                "investigate skill — starting background task for: %s",
                 combined_text,
             )
             try:
-                await self.session.say(on_it_phrase)
+                await self.session.say("On it, give me a moment to dig into this.")
             except Exception:
                 logger.exception("Failed to say 'on it'")
             self._async_task = asyncio.create_task(
-                self._run_async_skill_background(skill_result.skill, context, combined_text)
+                self._run_async_skill_background(context, combined_text)
             )
             return
 
@@ -496,12 +481,17 @@ class WarRoomAgent(Agent):
         # GENERAL/IDEATE are left as "auto" since they may not need tool calls.
         _tool_choice: str = (
             "required"
-            if skill_result.skill in (Skill.INVESTIGATE, Skill.DEBUG, Skill.RECALL, Skill.SUMMARIZE)
+            if skill_result.skill in (Skill.INVESTIGATE, Skill.DEBUG, Skill.RECALL)
             else "auto"
         )
 
         try:
-            logger.info("Generating reply for: [%s] %s (tool_choice=%s)", speaker, combined_text, _tool_choice)
+            logger.info(
+                "Generating reply for: [%s] %s (tool_choice=%s)",
+                speaker,
+                combined_text,
+                _tool_choice,
+            )
             handle = self.session.generate_reply(
                 user_input=f"[{speaker}] {combined_text}",
                 tool_choice=_tool_choice,  # type: ignore[arg-type]
@@ -632,7 +622,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     session: AgentSession[Any] = AgentSession(
         stt=stt,
         llm=openai.LLM(model=LLM_MODEL),
-        tts=elevenlabs.TTS(voice_id=ELEVENLABS_VOICE_ID),
+        tts=speechmatics.TTS(voice=SPEECHMATICS_TTS_VOICE),
         vad=silero.VAD.load(
             min_silence_duration=0.3,
             prefix_padding_duration=0.3,
@@ -709,7 +699,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             asyncio.create_task(
                 db.update_metrics(
                     session_id,
-                    elevenlabs_chars=len(text_str),
+                    tts_chars=len(text_str),
                     latency_ms=latency_ms,
                 )
             )

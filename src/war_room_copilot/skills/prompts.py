@@ -34,7 +34,8 @@ SKILL_PROMPTS: dict[Skill, str] = {
     ),
     Skill.INVESTIGATE: (
         "\n\n## Active Skill: Investigate\n"
-        "You MUST call tools to look up real data. Do NOT answer from memory or training knowledge.\n\n"
+        "You MUST call tools to look up real data. "
+        "Do NOT answer from memory or training knowledge.\n\n"
         "Available tools — use whichever fits the question:\n\n"
         "Datadog monitoring:\n"
         "- `query_datadog_apm(service, minutes_ago)` — latency, error rate, throughput\n"
@@ -74,19 +75,6 @@ SKILL_PROMPTS: dict[Skill, str] = {
         "from this session or previous incidents\n\n"
         "Be specific: reference who said what, when it was decided, and what the outcome was. "
         "If nothing is found, say so clearly rather than speculating."
-    ),
-    Skill.SUMMARIZE: (
-        "\n\n## Active Skill: Summarize\n"
-        "Before summarizing, use tools to get the current ground truth:\n\n"
-        "- `get_service_health()` — current health of all services\n"
-        "- `get_datadog_monitors()` — what's still alerting\n"
-        "- `recall_decision(query)` — what decisions and actions have been logged\n\n"
-        "Then provide a structured status recap:\n"
-        "1. Known facts — what we know for sure (cite tool results)\n"
-        "2. What's been tried — actions taken so far\n"
-        "3. Open unknowns — what we still don't know\n"
-        "4. Suggested next actions — what to do next\n"
-        "Keep it concise but complete."
     ),
     Skill.GENERAL: "",
 }

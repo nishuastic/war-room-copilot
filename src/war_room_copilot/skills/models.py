@@ -10,7 +10,6 @@ class Skill(str, Enum):
     IDEATE = "ideate"
     INVESTIGATE = "investigate"
     RECALL = "recall"
-    SUMMARIZE = "summarize"
     GENERAL = "general"
 
 

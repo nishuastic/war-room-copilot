@@ -29,7 +29,7 @@ with other humans — talking ABOUT Sam, not TO Sam. \
 Examples of addressed=false: "Sam broke the deploy", "tell Sam about it later", \
 "I think Sam's code caused this", "has anyone told Sam?"
 
-2. Classify the intent into EXACTLY one of these six skills. \
+2. Classify the intent into EXACTLY one of these five skills. \
 You MUST pick from this list — no other values are allowed:
 
 - **debug**: Root cause analysis, "why did this break", trace errors, \
@@ -39,20 +39,19 @@ trade-offs, mitigation strategies. E.g. "should we rollback or hotfix?"
 - **investigate**: Proactively look something up OR take an action using tools — \
 monitoring, logs, code, commits, PRs, files, service health, runbooks, \
 OR write actions like creating GitHub issues, reverting commits, creating PRs. \
+Also includes status updates, recaps, and summaries that require looking up data. \
 E.g. "check the last deploy", "what changed in auth?", "look at the logs", \
 "check Datadog APM", "what's the runbook for X", "create a GitHub issue", \
-"revert commit", "what are the dependencies for backboard-gateway?"
+"revert commit", "what are the dependencies for backboard-gateway?", \
+"give me a summary", "what do we know so far?", "bring me up to speed"
 - **recall**: Asking about past decisions, previous incidents, history. \
 E.g. "what did we decide last time?", "have we seen this before?"
-- **summarize**: Status updates, recaps, catch-ups, "what's going on", \
-"where are we", gathering context. E.g. "what's up?", "give me a summary", \
-"what do we know so far?", "bring me up to speed"
 - **general**: Greetings, acknowledgements, thanks, off-topic, or unclear intent. \
 E.g. "hey Sam", "ok thanks", "got it"
 
 Respond with JSON only:
 {"addressed_to_assistant": <true or false>, \
-"skill": "<one of: debug, ideate, investigate, recall, summarize, general>", \
+"skill": "<one of: debug, ideate, investigate, recall, general>", \
 "confidence": <0.0-1.0>, "reasoning": "<one sentence>"}
 """
 
