@@ -21,7 +21,23 @@ make token room:prod-incident identity:alice ttl:1h
 make livekit mode:prod   # uses /etc/livekit.yaml instead of --dev
 ```
 
-See all available commands with `make`.
+### All Make Commands
+
+| Command | Description |
+|---------|-------------|
+| `make setup` | Install all dependencies (Python + Node) |
+| `make dev` | Start all 4 services (LiveKit, agent, API, dashboard) |
+| `make agent` | Start the LiveKit agent only |
+| `make console` | Start agent in console mode (no browser needed) |
+| `make api` | Start the API server only |
+| `make frontend` | Start the dashboard dev server only |
+| `make livekit` | Start LiveKit server (`make livekit mode:prod` for production config) |
+| `make token` | Generate a room token (`make token room:my-room identity:alice ttl:1h`) |
+| `make lint` | Lint with auto-fix (`ruff check`) |
+| `make format` | Format code (`ruff format`) |
+| `make typecheck` | Type checking (`mypy`) |
+| `make test` | Run tests (`pytest`) |
+| `make check` | Run full quality pipeline (lint + format + typecheck + test) |
 
 ## Manual Setup
 
