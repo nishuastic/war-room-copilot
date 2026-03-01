@@ -189,13 +189,21 @@ async def reason_tool(ctx: RunContext, query: str) -> str:  # type: ignore[type-
         return f"Sorry, I encountered an error: {err_detail}"
 
 
-async def _purge_stale_rooms(proc: agents.JobProcess) -> None:
+def _purge_stale_rooms(proc: agents.JobProcess) -> None:
     """Prewarm callback: delete empty rooms left over from previous sessions.
 
     Runs once when each worker process initializes — before any job is accepted.
     This ensures stale rooms (from crashed agents or unclean disconnects) don't
     block new dispatch.
+
+    Note: ``prewarm_fnc`` is called synchronously by LiveKit (``Callable[[JobProcess], Any]``),
+    so we spin up a temporary event loop to run the async LiveKit API calls.
     """
+    asyncio.run(_purge_stale_rooms_async())
+
+
+async def _purge_stale_rooms_async() -> None:
+    """Async implementation of stale room cleanup."""
     cfg = get_settings()
     lk_api = api.LiveKitAPI(
         url=cfg.livekit_url.replace("ws://", "http://").replace("wss://", "https://"),
