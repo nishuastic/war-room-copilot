@@ -103,28 +103,41 @@ export function useIncidentStream() {
       const parsed = JSON.parse(event.data);
       switch (parsed.type) {
         case "transcript":
-          setMessages((prev) => [...prev, parsed.data]);
-          break;
-        case "finding":
-          setFindings((prev) => [...prev, parsed.data]);
-          toast.info(parsed.data.text?.slice(0, 80), { duration: 5000 });
-          break;
-        case "decision":
-          setDecisions((prev) => [...prev, parsed.data]);
-          toast.success(`Decision: ${parsed.data.text?.slice(0, 80)}`, { duration: 5000 });
-          break;
-        case "graph_trace":
-          setTraceSteps((prev) => [...prev, parsed.data]);
-          setGraphNodes((prev) =>
-            prev.map((n) =>
-              n.id === parsed.data.skill
-                ? { ...n, status: "completed" as const, activationCount: n.activationCount + 1 }
-                : n
-            )
+          setMessages((prev) =>
+            prev.some((m) => m.id === parsed.data.id) ? prev : [...prev, parsed.data]
           );
           break;
+        case "finding":
+          setFindings((prev) => {
+            if (prev.some((f) => f.id === parsed.data.id)) return prev;
+            toast.info(parsed.data.text?.slice(0, 80), { duration: 5000 });
+            return [...prev, parsed.data];
+          });
+          break;
+        case "decision":
+          setDecisions((prev) => {
+            if (prev.some((d) => d.id === parsed.data.id)) return prev;
+            toast.success(`Decision: ${parsed.data.text?.slice(0, 80)}`, { duration: 5000 });
+            return [...prev, parsed.data];
+          });
+          break;
+        case "graph_trace":
+          setTraceSteps((prev) => {
+            if (prev.some((s) => s.id === parsed.data.id)) return prev;
+            setGraphNodes((nodes) =>
+              nodes.map((n) =>
+                n.id === parsed.data.skill
+                  ? { ...n, status: "completed" as const, activationCount: n.activationCount + 1 }
+                  : n
+              )
+            );
+            return [...prev, parsed.data];
+          });
+          break;
         case "timeline":
-          setTimeline((prev) => [...prev, parsed.data]);
+          setTimeline((prev) =>
+            prev.some((t) => t.id === parsed.data.id) ? prev : [...prev, parsed.data]
+          );
           break;
         case "speaker_update":
           setSpeakers((prev) => {
