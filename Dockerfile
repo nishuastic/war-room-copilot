@@ -5,13 +5,13 @@ WORKDIR /app
 
 # Copy dependency files first for layer caching
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project --extra all-llm
 
 # Copy source, assets, and README (required by hatchling build), then install the project itself
 COPY src/ src/
 COPY assets/ assets/
 COPY README.md .
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra all-llm
 
 # ── Runtime stage: slim image, no build tools ─────────────────────────────────
 FROM python:3.12-slim-bookworm

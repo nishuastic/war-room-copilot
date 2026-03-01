@@ -1,11 +1,14 @@
 services:
   livekit-server:
     image: livekit/livekit-server:latest
-    command: --dev --bind 0.0.0.0 --node-ip 0.0.0.0
+    command: --dev --bind 0.0.0.0 --config /etc/livekit.yaml
     ports:
       - "7880:7880"   # WebSocket + HTTP API
       - "7881:7881"   # WebRTC TCP
+      #- "8000:8000"   # Dashboard API on agent
       - "50000-50060:50000-50060/udp"  # WebRTC UDP (ICE candidates)
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880"]
       interval: 5s
@@ -19,22 +22,15 @@ services:
       - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN}
     expose:
       - "8090"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8090/mcp"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
     restart: unless-stopped
 
   agent:
     build: .
     env_file: .env
     environment:
-      # Override LIVEKIT_URL to use Docker-internal DNS
       - LIVEKIT_URL=ws://livekit-server:7880
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=secret
-      # GitHub MCP sidecar URL (Docker-internal)
       - GITHUB_MCP_URL=http://github-mcp-server:8090/mcp
     ports:
       - "8000:8000"  # Dashboard API
@@ -46,10 +42,8 @@ services:
         max-size: "10m"
         max-file: "3"
     depends_on:
-      livekit-server:
-        condition: service_healthy
       github-mcp-server:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
 volumes:

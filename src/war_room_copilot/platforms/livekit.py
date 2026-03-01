@@ -292,7 +292,6 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
                 "Greet the team briefly. Say you are War Room Copilot and ready to listen."
             )
         )
-
     async def capture_voiceprints() -> None:
         await asyncio.sleep(15)
         while True:
