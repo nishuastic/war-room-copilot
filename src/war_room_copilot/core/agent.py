@@ -61,6 +61,7 @@ from ..models import SpeakerMetadata, TranscriptSegment
 from ..skills import SKILL_PROMPTS, SkillResult, SkillRouter
 from ..skills.investigation import run_investigation
 from ..skills.models import Skill
+from ..skills.summarization import run_summarization
 from ..tools.github import (
     get_blame,
     get_commit_diff,
@@ -250,9 +251,9 @@ class WarRoomAgent(Agent):
         self._wake_buffer: list[str] = []
         self._wake_buffer_speaker: str = ""
         self._wake_buffer_timer: asyncio.Task[None] | None = None
-        # Async investigation state
-        self._pending_investigation: str | None = None
-        self._investigation_task: asyncio.Task[None] | None = None
+        # Async background skill state (investigate / summarize)
+        self._pending_result: str | None = None
+        self._async_task: asyncio.Task[None] | None = None
 
     async def _run_silent_skill(
         self, context: str, user_message: str, skill_result: SkillResult
@@ -289,24 +290,30 @@ class WarRoomAgent(Agent):
         except Exception:
             logger.exception("Silent skill failed for %s", skill_result.skill.value)
 
-    async def _run_investigation_background(self, context: str, user_message: str) -> None:
-        """Run a GitHub investigation asynchronously and notify when done."""
-        logger.info("Background investigation started for: %s", user_message)
+    async def _run_async_skill_background(
+        self, skill: Skill, context: str, user_message: str
+    ) -> None:
+        """Run investigate or summarize asynchronously and notify when done."""
+        logger.info("Background %s started for: %s", skill.value, user_message)
         try:
-            result = await run_investigation(context, user_message)
-            self._pending_investigation = result
-            logger.info("Background investigation complete (%d chars)", len(result))
-            self.session.say(
-                "Done investigating. Let me know when you want me to share my findings."
-            )
+            if skill == Skill.INVESTIGATE:
+                result = await run_investigation(context, user_message)
+                done_phrase = (
+                    "Done investigating. Let me know when you want me to share my findings."
+                )
+            else:  # SUMMARIZE
+                result = await run_summarization(context, user_message)
+                done_phrase = "Done. Let me know when you want me to share the summary."
+
+            self._pending_result = result
+            logger.info("Background %s complete (%d chars)", skill.value, len(result))
+            self.session.say(done_phrase)
         except Exception:
-            logger.exception("Background investigation failed")
-            self._pending_investigation = (
-                "The investigation ran into an error. Try asking me again."
-            )
+            logger.exception("Background %s failed", skill.value)
+            self._pending_result = f"The {skill.value} ran into an error. Try asking me again."
             try:
                 self.session.say(
-                    "I hit an issue during investigation. Ask me again for what I found."
+                    f"I hit an issue during the {skill.value}. Ask me again for what I found."
                 )
             except Exception:
                 pass
@@ -391,20 +398,20 @@ class WarRoomAgent(Agent):
 
         logger.info("Wake buffer flushed: '%s'", combined_text)
 
-        # --- Deliver pending investigation result if one is ready ---
-        if self._pending_investigation is not None:
-            result = self._pending_investigation
-            self._pending_investigation = None
-            logger.info("Delivering pending investigation result (%d chars)", len(result))
+        # --- Deliver pending async result if one is ready ---
+        if self._pending_result is not None:
+            result = self._pending_result
+            self._pending_result = None
+            logger.info("Delivering pending async result (%d chars)", len(result))
             try:
                 await self.session.say(result)
             except Exception:
-                logger.exception("Failed to deliver investigation result")
+                logger.exception("Failed to deliver async result")
             return
 
-        # --- Notify if investigation is still running ---
-        if self._investigation_task is not None and not self._investigation_task.done():
-            logger.info("Investigation still running — notifying user")
+        # --- Notify if async task is still running ---
+        if self._async_task is not None and not self._async_task.done():
+            logger.info("Async skill still running — notifying user")
             try:
                 self.session.say("Still on it, I'll let you know when I'm done.")
             except Exception:
@@ -439,15 +446,24 @@ class WarRoomAgent(Agent):
             asyncio.create_task(self._run_silent_skill(context, combined_text, skill_result))
             return
 
-        # --- INVESTIGATE: say "on it", then run in background ---
-        if skill_result.skill == Skill.INVESTIGATE:
-            logger.info("Investigate skill — starting background task for: %s", combined_text)
+        # --- INVESTIGATE / SUMMARIZE: say "on it", then run in background ---
+        async_skill_phrases = {
+            Skill.INVESTIGATE: "On it, give me a moment to dig into this.",
+            Skill.SUMMARIZE: "On it, give me a moment to pull that together.",
+        }
+        if skill_result.skill in async_skill_phrases:
+            on_it_phrase = async_skill_phrases[skill_result.skill]
+            logger.info(
+                "%s skill — starting background task for: %s",
+                skill_result.skill.value,
+                combined_text,
+            )
             try:
-                await self.session.say("On it, give me a moment to dig into this.")
+                await self.session.say(on_it_phrase)
             except Exception:
                 logger.exception("Failed to say 'on it'")
-            self._investigation_task = asyncio.create_task(
-                self._run_investigation_background(context, combined_text)
+            self._async_task = asyncio.create_task(
+                self._run_async_skill_background(skill_result.skill, context, combined_text)
             )
             return
 

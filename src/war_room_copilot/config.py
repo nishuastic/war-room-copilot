@@ -5,10 +5,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parents[2]
 
 # LLM
-LLM_MODEL = "gpt-4.1-mini"
+LLM_MODEL = "gpt-4o"
 
 # Skill router
-ROUTER_MODEL = "gpt-4.1-nano"
+ROUTER_MODEL = "gpt-4.1-mini"
 ROUTER_TIMEOUT = 2.0  # seconds
 CONFIDENCE_SPEAK = 0.7
 CONFIDENCE_DASHBOARD = 0.4

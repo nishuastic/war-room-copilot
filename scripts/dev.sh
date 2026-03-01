@@ -25,9 +25,21 @@ trap cleanup SIGINT SIGTERM
 echo -e "${BOLD}Starting War Room Copilot...${NC}"
 echo ""
 
+# Kill any stale processes from a previous run
+echo -e "Cleaning up stale processes..."
+pkill -f "livekit-server" 2>/dev/null || true
+pkill -f "war_room_copilot.core.agent" 2>/dev/null || true
+pkill -f "war_room_copilot.api.main" 2>/dev/null || true
+pkill -f "vite" 2>/dev/null || true
+# Free ports in case something else is holding them
+for port in 7880 8000 5173; do
+    lsof -ti:"$port" | xargs kill -9 2>/dev/null || true
+done
+sleep 1
+
 # 1. LiveKit server (must start first)
 echo -e "${RED}[livekit]${NC}  Starting LiveKit server..."
-livekit-server --config .data/livekit-dev.yaml 2>&1 | grep -v "^$" | sed "s/^/$(printf "${RED}[livekit]${NC} ")/" &
+livekit-server --dev --bind 0.0.0.0 2>&1 | grep -v "^$" | sed "s/^/$(printf "${RED}[livekit]${NC} ")/" &
 PIDS+=($!)
 sleep 2
 
