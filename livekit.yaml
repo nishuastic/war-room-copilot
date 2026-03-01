@@ -1,7 +1,6 @@
 # LiveKit RTC configuration for Docker Desktop on Mac
-# node_ip must be your host's LAN IP (reachable from both browser and agent container)
-# Find it with: ipconfig getifaddr en0
-# IMPORTANT: use_external_ip MUST be false or node_ip is silently ignored
+# IMPORTANT: use_external_ip MUST be false or --node-ip is silently ignored (livekit/livekit#4049)
+# node_ip is set via --node-ip CLI flag from NODE_IP env var in .env
 
 # Auto-destroy rooms 60s after the last participant leaves.
 # Prevents stale rooms from blocking agent dispatch on reconnect.
@@ -13,5 +12,4 @@ rtc:
   port_range_start: 50000
   port_range_end: 50060
   use_external_ip: false
-  node_ip: 10.110.59.48
   enable_loopback_candidate: true

@@ -1,7 +1,7 @@
 services:
   livekit-server:
     image: livekit/livekit-server:latest
-    command: --dev --bind 0.0.0.0 --config /etc/livekit.yaml
+    command: --dev --bind 0.0.0.0 --config /etc/livekit.yaml --node-ip ${NODE_IP}
     ports:
       - "7880:7880"   # WebSocket + HTTP API
       - "7881:7881"   # WebRTC TCP

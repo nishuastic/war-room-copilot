@@ -10,7 +10,7 @@ Everything runs inside Docker Compose — no local Python, Homebrew, or LiveKit 
 
 ```bash
 cp .env.example .env       # fill in your API keys
-docker compose up --build   # start LiveKit + GitHub MCP + Agent
+make up                    # auto-detects LAN IP, starts everything
 ```
 
 This starts three services:
@@ -51,6 +51,7 @@ Edit `.env` and set your API keys:
 | `GITHUB_TOKEN` | No | GitHub repo access via MCP sidecar |
 | `DEFAULT_REPO_OWNER` | No | Default GitHub org/user for repo context |
 | `DEFAULT_REPO_NAME` | No | Default GitHub repo name |
+| `NODE_IP` | Yes | Your Mac's LAN IP for WebRTC (`ipconfig getifaddr en0`) |
 
 LiveKit defaults (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`) and the GitHub MCP URL (`GITHUB_MCP_URL`) are auto-configured inside Docker Compose.
 
@@ -212,12 +213,12 @@ Then inspect: `docker compose exec agent cat /app/data/agent_crash.log`
 
 ### WebRTC not connecting (no audio/video)
 
-The `node_ip` in `livekit.yaml` must be your host's current LAN IP (reachable from both the browser and the agent container). Find it and update:
+`NODE_IP` in `.env` must be your host's current LAN IP (reachable from both the browser and the agent container). Detect and update:
 
 ```bash
-ipconfig getifaddr en0          # macOS — get current LAN IP
-# Update livekit.yaml with the new IP, then:
-docker compose restart livekit-server
+./scripts/detect-ip.sh          # prints NODE_IP=<your-ip>
+# Copy the output into .env, then:
+docker compose up -d livekit-server   # recreate with new IP
 ```
 
 This IP changes when you switch WiFi networks.

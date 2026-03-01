@@ -189,16 +189,31 @@ async def reason_tool(ctx: RunContext, query: str) -> str:  # type: ignore[type-
         return f"Sorry, I encountered an error: {err_detail}"
 
 
-def _purge_stale_rooms(proc: agents.JobProcess) -> None:
-    """Prewarm callback: delete empty rooms left over from previous sessions.
+def _prewarm(proc: agents.JobProcess) -> None:
+    """Prewarm callback: pre-import LLM plugins and clean up stale rooms.
 
-    Runs once when each worker process initializes — before any job is accepted.
-    This ensures stale rooms (from crashed agents or unclean disconnects) don't
-    block new dispatch.
+    Runs once when each worker process initializes — before any job is
+    accepted.  Two responsibilities:
 
-    Note: ``prewarm_fnc`` is called synchronously by LiveKit (``Callable[[JobProcess], Any]``),
-    so we spin up a temporary event loop to run the async LiveKit API calls.
+    1. **Plugin registration** — LiveKit plugins must be imported on the
+       main thread (``Plugin.register_plugin`` enforces this).  The
+       ``create_llm()`` factory lazy-imports plugins, so if the first
+       call happens in the entrypoint (which runs on a worker thread in
+       THREAD mode, or the child's main thread in PROCESS mode) the
+       import can fail.  Pre-importing here guarantees registration
+       happens on each process's main thread.
+
+    2. **Stale room cleanup** — deletes empty rooms left over from
+       previous sessions so they don't block new dispatch.
     """
+    # Pre-import LLM plugins so they register on the main thread.
+    from war_room_copilot.llm import create_llm
+
+    try:
+        create_llm()
+    except Exception:
+        logger.debug("LLM pre-import (expected if API key missing)", exc_info=True)
+
     asyncio.run(_purge_stale_rooms_async())
 
 
@@ -212,12 +227,12 @@ async def _purge_stale_rooms_async() -> None:
     )
     try:
         rooms_resp = await lk_api.room.list_rooms(api.ListRoomsRequest())
-        now_ns = time.time_ns()
+        now_s = int(time.time())
         for room in rooms_resp.rooms:
-            age_s = (now_ns - room.creation_time) / 1e9
+            age_s = now_s - room.creation_time
             if room.num_participants == 0 and age_s > _STALE_ROOM_AGE_SECONDS:
                 logger.info(
-                    "Purging stale room %s (age=%.0fs, participants=%d)",
+                    "Purging stale room %s (age=%ds, participants=%d)",
                     room.name,
                     age_s,
                     room.num_participants,
@@ -248,9 +263,15 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
     }
     _state_lock = asyncio.Lock()
 
+    # Block until the room disconnects — without this, the entrypoint returns
+    # immediately and LiveKit considers the job done (agent leaves after ~120ms).
+    disconnect_event = asyncio.Event()
+    ctx.room.on("disconnected", lambda _reason: disconnect_event.set())
+
     # Register shutdown callback so resources are cleaned up when the job ends.
     async def _on_shutdown() -> None:
         logger.info("Job shutting down for room %s — cleaning up", ctx.room.name)
+        disconnect_event.set()
         await close_mcp_client()
         # Cancel background tasks (they hold references to session/stt)
         for task in list(_background_tasks):
@@ -517,6 +538,9 @@ async def _entrypoint(ctx: agents.JobContext) -> None:
     _launch_task(sync_to_backboard(), name="sync_to_backboard")
     _launch_task(start_dashboard_api(), name="start_dashboard_api")
 
+    await disconnect_event.wait()
+    logger.info("Room disconnected, entrypoint exiting")
+
 
 class LiveKitPlatform:
     """MeetingPlatform backed by the LiveKit Agents framework.
@@ -531,7 +555,7 @@ class LiveKitPlatform:
         agents.cli.run_app(
             agents.WorkerOptions(
                 entrypoint_fnc=_entrypoint,
-                prewarm_fnc=_purge_stale_rooms,
+                prewarm_fnc=_prewarm,
             )
         )
 
