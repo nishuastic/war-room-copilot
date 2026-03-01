@@ -14,10 +14,22 @@ from .models import Skill, SkillResult
 logger = logging.getLogger("war-room-copilot")
 
 _ROUTER_SYSTEM_PROMPT = """\
-You are a skill classifier for a production incident war room AI assistant.
+You are a skill classifier for a production incident war room AI assistant named Sam.
 
-Given the recent conversation context and the user's message, \
-classify the intent into EXACTLY one of these six skills. \
+Given the recent conversation context and the user's message, do two things:
+
+1. Determine whether the user is **directly addressing Sam** (the assistant). \
+Set "addressed_to_assistant" to true when the user is speaking TO Sam in any way — \
+asking Sam to do something, requesting information, greeting Sam, saying Sam's name \
+to get attention, or any message where Sam is the intended listener. \
+Examples of addressed=true: "Sam, how are you?", "hey Sam", "Sam what happened?", \
+"my boy Sam, how are you?", "Sam.", "yo Sam can you check the logs?" \
+Set it to false ONLY when "Sam" is mentioned as a third person in conversation \
+with other humans — talking ABOUT Sam, not TO Sam. \
+Examples of addressed=false: "Sam broke the deploy", "tell Sam about it later", \
+"I think Sam's code caused this", "has anyone told Sam?"
+
+2. Classify the intent into EXACTLY one of these six skills. \
 You MUST pick from this list — no other values are allowed:
 
 - **debug**: Root cause analysis, "why did this break", trace errors, \
@@ -35,7 +47,8 @@ E.g. "what did we decide last time?", "have we seen this before?"
 E.g. "hey Sam", "ok thanks", "got it"
 
 Respond with JSON only:
-{"skill": "<one of: debug, ideate, investigate, recall, summarize, general>", \
+{"addressed_to_assistant": <true or false>, \
+"skill": "<one of: debug, ideate, investigate, recall, summarize, general>", \
 "confidence": <0.0-1.0>, "reasoning": "<one sentence>"}
 """
 
@@ -84,12 +97,24 @@ class SkillRouter:
                 skill = Skill.GENERAL
             confidence = max(0.0, min(1.0, float(data["confidence"])))
             reasoning = str(data.get("reasoning", ""))
+            addressed = data.get("addressed_to_assistant", True)
+
+            # If not directly addressed to Sam, drop confidence to 0 so agent stays silent
+            if not addressed:
+                logger.info(
+                    "Not addressed to assistant — suppressing response (was %.2f %s)",
+                    confidence,
+                    skill.value,
+                )
+                confidence = 0.0
+                reasoning = f"Not addressed to assistant. Original: {reasoning}"
 
             result = SkillResult(skill=skill, confidence=confidence, reasoning=reasoning)
             logger.info(
-                "Skill route: %s (%.2f) — %s",
+                "Skill route: %s (%.2f) addressed=%s — %s",
                 result.skill.value,
                 result.confidence,
+                addressed,
                 result.reasoning,
             )
             return result

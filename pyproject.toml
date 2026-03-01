@@ -34,6 +34,10 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
 
+[tool.ruff.lint.per-file-ignores]
+# Logging silencer loop must run before library imports to suppress noisy loggers at import time
+"src/war_room_copilot/core/agent.py" = ["E402"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

@@ -110,7 +110,7 @@ def load_known_speakers() -> list[SpeakerMetadata]:
 
 def save_speakers(raw_speakers: list[Any]) -> None:
     # Load existing data to preserve custom labels
-    existing: dict[str, dict] = {}
+    existing: dict[str, dict[str, Any]] = {}
     if SPEAKERS_FILE.exists():
         with open(SPEAKERS_FILE) as f:
             for entry in json.load(f):
@@ -175,25 +175,56 @@ def to_speaker_identifiers(speakers: list[SpeakerMetadata]) -> list[SpeakerIdent
 
 
 def parse_transcript(raw_text: str) -> TranscriptSegment:
-    """Parse Speechmatics tagged text into a TranscriptSegment."""
-    is_passive = bool(PASSIVE_WRAP.search(raw_text))
-    inner = PASSIVE_WRAP.sub(r"\1", raw_text)
-    match = SPEAKER_TAG.search(inner)
-    if match:
-        speaker_id = match.group(1)
-        text = match.group(2).strip()
-    else:
-        speaker_id = "unknown"
-        text = inner.strip()
+    """Parse Speechmatics tagged text into a TranscriptSegment (first segment)."""
+    segments = parse_all_segments(raw_text)
+    if segments:
+        return segments[0]
     return TranscriptSegment(
-        speaker_id=speaker_id,
-        text=text,
+        speaker_id="unknown",
+        text=raw_text.strip(),
         timestamp=time.time(),
-        is_passive=is_passive,
+        is_passive=False,
     )
 
 
-class WarRoomAgent(Agent):  # type: ignore[misc]
+def parse_all_segments(raw_text: str) -> list[TranscriptSegment]:
+    """Parse ALL speaker segments from Speechmatics tagged text."""
+    now = time.time()
+    segments: list[TranscriptSegment] = []
+
+    # Extract passive segments with their speaker tags
+    for passive_match in PASSIVE_WRAP.finditer(raw_text):
+        inner = passive_match.group(1)
+        for tag_match in SPEAKER_TAG.finditer(inner):
+            text = tag_match.group(2).strip()
+            if text:
+                segments.append(
+                    TranscriptSegment(
+                        speaker_id=tag_match.group(1),
+                        text=text,
+                        timestamp=now,
+                        is_passive=True,
+                    )
+                )
+
+    # Extract active segments (everything outside <PASSIVE> tags)
+    active = PASSIVE_WRAP.sub("", raw_text)
+    for tag_match in SPEAKER_TAG.finditer(active):
+        text = tag_match.group(2).strip()
+        if text:
+            segments.append(
+                TranscriptSegment(
+                    speaker_id=tag_match.group(1),
+                    text=text,
+                    timestamp=now,
+                    is_passive=False,
+                )
+            )
+
+    return segments
+
+
+class WarRoomAgent(Agent):
     def __init__(
         self,
         instructions: str,
@@ -253,33 +284,53 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
         except Exception:
             logger.exception("Silent skill failed for %s", skill_result.skill.value)
 
+    def _process_transcript(self, raw_text: str) -> list[TranscriptSegment]:
+        """Log, store, and track all transcript segments. Returns parsed segments."""
+        _log_transcript(raw_text)
+
+        all_segments = parse_all_segments(raw_text)
+        primary = parse_transcript(raw_text)
+
+        # Store primary segment in short-term memory and SQLite
+        self._memory.add(primary)
+        asyncio.create_task(self._db.add_segment(self._session_id, primary))
+
+        # Store ALL segments in Backboard long-term memory (non-blocking)
+        if self._long_term is not None:
+            for seg in all_segments:
+                asyncio.create_task(self._long_term.store(f"[{seg.speaker_id}] {seg.text}"))
+
+        # Check for decisions across all segments (non-blocking)
+        if self._decision_tracker is not None:
+            for seg in all_segments:
+                asyncio.create_task(self._decision_tracker.check_for_decision(seg))
+
+        return all_segments
+
     async def on_user_turn_completed(
         self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage
     ) -> None:
         raw_text = new_message.text_content or ""
-        _log_transcript(raw_text)
-        segment = parse_transcript(raw_text)
 
-        # Store in short-term memory and SQLite
-        self._memory.add(segment)
-        asyncio.create_task(self._db.add_segment(self._session_id, segment))
+        # Transcript storage is handled by user_input_transcribed event handler.
+        # Parse segments here only for wake word detection and buffer management.
+        all_segments = parse_all_segments(raw_text)
 
-        # Store in Backboard long-term memory (non-blocking)
-        if self._long_term is not None:
-            asyncio.create_task(self._long_term.store(f"[{segment.speaker_id}] {segment.text}"))
-
-        # Check for decisions (non-blocking)
-        if self._decision_tracker is not None:
-            asyncio.create_task(self._decision_tracker.check_for_decision(segment))
-
-        # If buffer is active, append this segment's text (continuation of wake word sentence)
+        # If buffer is active, append all segment texts (continuation of wake word sentence)
         if self._wake_buffer_timer is not None and not self._wake_buffer_timer.done():
-            self._wake_buffer.append(segment.text)
-            logger.info("Wake buffer: appended '%s'", segment.text)
+            for seg in all_segments:
+                self._wake_buffer.append(seg.text)
+            logger.info("Wake buffer: appended %d segment(s)", len(all_segments))
             raise StopResponse()
 
-        # Wake word check
-        if WAKE_WORD not in segment.text.lower():
+        # Wake word check — scan ALL segments, not just the first one
+        wake_segment: TranscriptSegment | None = None
+        for seg in all_segments:
+            if WAKE_WORD in seg.text.lower():
+                wake_segment = seg
+                break
+
+        if wake_segment is None:
             raise StopResponse()
 
         # Wake word detected — record timestamp for latency tracking
@@ -288,13 +339,16 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
             self._db.add_trace(
                 self._session_id,
                 "wake_word",
-                {"text": segment.text, "speaker_id": segment.speaker_id},
+                {"text": wake_segment.text, "speaker_id": wake_segment.speaker_id},
             )
         )
 
+        # Collect ALL text from ALL segments for context (not just the wake word segment)
+        all_text = " ".join(seg.text for seg in all_segments)
+
         # Start sentence buffer — wait for continuation segments before routing
-        self._wake_buffer = [segment.text]
-        self._wake_buffer_speaker = segment.speaker_id
+        self._wake_buffer = [all_text]
+        self._wake_buffer_speaker = wake_segment.speaker_id
         self._wake_buffer_timer = asyncio.create_task(self._flush_wake_buffer())
         logger.info("Wake buffer: started (%.2fs window)", WAKE_WORD_BUFFER)
         raise StopResponse()
@@ -343,9 +397,20 @@ class WarRoomAgent(Agent):  # type: ignore[misc]
         if skill_prompt:
             await self.update_instructions(self._base_instructions + skill_prompt)
 
-        await self.session.generate_reply(
-            user_input=f"[{speaker}] {combined_text}",
-        )
+        try:
+            logger.info("Generating reply for: [%s] %s", speaker, combined_text)
+            handle = self.session.generate_reply(
+                user_input=f"[{speaker}] {combined_text}",
+            )
+            logger.info("generate_reply returned handle %s", handle.id)
+            await handle
+            logger.info("Speech playout complete for handle %s", handle.id)
+        except RuntimeError:
+            logger.error(
+                "generate_reply failed (speech scheduling likely paused) — speech not delivered"
+            )
+        except Exception:
+            logger.exception("Unexpected error in generate_reply")
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:
@@ -433,7 +498,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         recall_decision,
     ]
 
-    session = AgentSession(
+    session: AgentSession[Any] = AgentSession(
         stt=stt,
         llm=openai.LLM(model=LLM_MODEL),
         tts=elevenlabs.TTS(voice_id=ELEVENLABS_VOICE_ID),
@@ -444,6 +509,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         ),
         tools=tools,
         max_tool_steps=7,
+        # Require at least 4 words before allowing an interruption.
+        # Prevents the user's own follow-up phrases (e.g. "Talking to you")
+        # from cutting off Sam's reply before it even starts.
+        min_interruption_words=4,
     )
 
     router = SkillRouter()
@@ -465,7 +534,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     )
 
     # Trace tool calls and LLM responses via session events
-    @session.on("function_calls_collected")  # type: ignore[misc]
+    @session.on("function_calls_collected")  # type: ignore[arg-type]
     def _on_tool_calls(calls: Any) -> None:
         for call in calls if isinstance(calls, list) else [calls]:
             tool_name = getattr(call, "function_name", str(call))
@@ -476,7 +545,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # Count LLM call
         asyncio.create_task(db.update_metrics(session_id, llm_calls=1))
 
-    @session.on("function_calls_finished")  # type: ignore[misc]
+    @session.on("function_calls_finished")  # type: ignore[arg-type]
     def _on_tool_results(calls: Any) -> None:
         for call in calls if isinstance(calls, list) else [calls]:
             tool_name = getattr(call, "function_name", str(call))
@@ -487,7 +556,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 )
             )
 
-    @session.on("agent_speech_committed")  # type: ignore[misc]
+    @session.on("agent_speech_committed")  # type: ignore[arg-type]
     def _on_agent_speech(msg: Any) -> None:
         text = getattr(msg, "content", None) or str(msg)
         if text:
@@ -519,6 +588,24 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                     latency_ms=latency_ms,
                 )
             )
+
+    @session.on("user_input_transcribed")
+    def _on_user_input_transcribed(ev: Any) -> None:
+        """Fires for ALL final transcripts regardless of scheduling state.
+
+        This ensures transcripts are logged, stored in memory/SQLite/Backboard,
+        and checked for decisions even when speech scheduling is paused
+        (e.g. during interruptions).  The event fires per-segment (not per-turn),
+        so each invocation typically contains one tagged segment.
+        """
+        # Only process final transcripts (skip interim/partial)
+        if not getattr(ev, "is_final", False):
+            return
+        raw_text = getattr(ev, "transcript", "") or ""
+        if not raw_text.strip():
+            return
+        # Delegate to agent's transcript processing (log + store + track)
+        war_room_agent._process_transcript(raw_text)
 
     async def capture_voiceprints() -> None:
         await asyncio.sleep(VOICEPRINT_INITIAL_DELAY)

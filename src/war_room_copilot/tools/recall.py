@@ -19,7 +19,7 @@ def set_memory_context(db: IncidentDB, long_term: LongTermMemory, session_id: in
     _session_id = session_id
 
 
-@llm.function_tool()  # type: ignore[misc]
+@llm.function_tool()
 async def recall_decision(query: str) -> str:
     """Recall a decision made during this or past incidents. Use when someone asks about
     a past decision, action item, or agreement."""
