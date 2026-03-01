@@ -9,6 +9,155 @@ import type { DecisionRow } from './components/DecisionList'
 
 import './index.css'
 
+function fmtDateLong(ts: number) {
+  return new Date(ts * 1000).toLocaleString([], {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function generateMinutesHTML(
+  session: { id: number; room_name: string; started_at: number; ended_at: number | null } | undefined,
+  transcriptRows: TranscriptRow[],
+  traceRows: TraceRow[],
+  decisions: DecisionRow[],
+): string {
+  if (!session) return ''
+
+  const duration = session.ended_at
+    ? Math.round((session.ended_at - session.started_at) / 60) + ' min'
+    : 'Ongoing'
+
+  const speakers = [...new Set(transcriptRows.filter(r => r.speaker_id !== 'sam').map(r => r.speaker_id))]
+  const toolCalls = traceRows.filter(r => r.event_type === 'tool_call').map(r => {
+    try { return JSON.parse(r.data).tool ?? '' } catch { return '' }
+  }).filter(Boolean)
+  const uniqueTools = [...new Set(toolCalls)]
+
+  const transcriptHtml = transcriptRows.map(r => {
+    const isSam = r.speaker_id === 'sam'
+    const time = new Date(r.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return `<div class="turn ${isSam ? 'sam' : 'human'}">
+      <span class="speaker">${isSam ? 'Sam (AI)' : r.speaker_id}</span>
+      <span class="time">${time}</span>
+      <p>${r.text}</p>
+    </div>`
+  }).join('')
+
+  const decisionsHtml = decisions.length > 0
+    ? decisions.map(d => {
+        const pct = Math.round(d.confidence * 100)
+        const time = new Date(d.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        return `<div class="decision">
+          <p>${d.text}</p>
+          <div class="decision-meta">
+            <span class="badge">${pct}% confidence</span>
+            <span class="speaker-tag">${d.speaker_id}</span>
+            <span class="time">${time}</span>
+          </div>
+        </div>`
+      }).join('')
+    : '<p class="empty">No decisions recorded.</p>'
+
+  const toolsHtml = uniqueTools.length > 0
+    ? uniqueTools.map(t => `<span class="tool-tag">${t.replace(/_/g, ' ')}</span>`).join('')
+    : '<span class="empty">No tools used.</span>'
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Minutes — ${session.room_name}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f7; color: #1d1d1f; padding: 40px 24px; }
+    .page { max-width: 760px; margin: 0 auto; }
+
+    /* Cover */
+    .cover { background: linear-gradient(135deg, #6366F1, #8B5CF6); border-radius: 16px; padding: 36px 40px; color: white; margin-bottom: 32px; }
+    .cover h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+    .cover .subtitle { font-size: 14px; opacity: 0.8; margin-bottom: 20px; }
+    .cover .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; }
+    .cover .meta-item label { font-size: 11px; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 3px; }
+    .cover .meta-item span { font-size: 14px; font-weight: 600; }
+
+    /* Sections */
+    section { background: white; border-radius: 12px; padding: 24px 28px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+    section h2 { font-size: 13px; font-weight: 700; color: #6366F1; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 16px; }
+
+    /* Participants */
+    .participant-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .participant { background: #f0f0f5; border-radius: 20px; padding: 4px 14px; font-size: 13px; font-weight: 500; }
+
+    /* Tools */
+    .tools-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tool-tag { background: #eef2ff; color: #4f46e5; border-radius: 20px; padding: 4px 12px; font-size: 12px; font-weight: 500; }
+
+    /* Decisions */
+    .decision { border-left: 3px solid #10b981; padding: 10px 14px; margin-bottom: 12px; background: #f9fafb; border-radius: 0 8px 8px 0; }
+    .decision p { font-size: 14px; line-height: 1.55; font-weight: 500; margin-bottom: 8px; }
+    .decision-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .badge { background: rgba(16,185,129,0.12); color: #059669; border-radius: 20px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+    .speaker-tag { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: 600; color: #374151; }
+    .time { font-size: 11px; color: #9ca3af; font-variant-numeric: tabular-nums; }
+
+    /* Transcript */
+    .turn { padding: 8px 0; border-bottom: 1px solid #f3f4f6; }
+    .turn:last-child { border-bottom: none; }
+    .turn .speaker { font-size: 12px; font-weight: 700; margin-right: 8px; }
+    .turn.sam .speaker { color: #6366F1; }
+    .turn.human .speaker { color: #0066CC; }
+    .turn p { font-size: 13.5px; line-height: 1.6; color: #1d1d1f; margin-top: 3px; }
+
+    .empty { color: #9ca3af; font-size: 13px; font-style: italic; }
+
+    /* Footer */
+    .footer { text-align: center; font-size: 12px; color: #9ca3af; margin-top: 32px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="cover">
+      <h1>War Room Minutes</h1>
+      <div class="subtitle">${session.room_name}</div>
+      <div class="meta-grid">
+        <div class="meta-item"><label>Started</label><span>${fmtDateLong(session.started_at)}</span></div>
+        <div class="meta-item"><label>Duration</label><span>${duration}</span></div>
+        <div class="meta-item"><label>Session ID</label><span>#${session.id}</span></div>
+        <div class="meta-item"><label>Participants</label><span>${speakers.length + 1} (incl. Sam)</span></div>
+      </div>
+    </div>
+
+    <section>
+      <h2>Participants</h2>
+      <div class="participant-list">
+        <span class="participant" style="background:#eef2ff;color:#4f46e5">Sam (AI Copilot)</span>
+        ${speakers.map(s => `<span class="participant">${s}</span>`).join('')}
+      </div>
+    </section>
+
+    <section>
+      <h2>Decisions Captured · ${decisions.length}</h2>
+      ${decisionsHtml}
+    </section>
+
+    <section>
+      <h2>Tools Used · ${uniqueTools.length}</h2>
+      <div class="tools-wrap">${toolsHtml}</div>
+    </section>
+
+    <section>
+      <h2>Full Transcript · ${transcriptRows.length} turns</h2>
+      ${transcriptHtml || '<p class="empty">No transcript recorded.</p>'}
+    </section>
+
+    <div class="footer">Generated by War Room Copilot · ${new Date().toLocaleString()}</div>
+  </div>
+</body>
+</html>`
+}
+
 const API = '/api'
 
 function useDecisions(sessionId: number | null) {
@@ -42,18 +191,25 @@ export default function App() {
     if (selectedId === null && latestId !== null) setSelectedId(latestId)
   }, [latestId, selectedId])
 
-  const transcriptRows = useSSE<TranscriptRow>(
+  const { items: transcriptRows, partials } = useSSE<TranscriptRow>(
     selectedId !== null ? `/api/sessions/${selectedId}/stream` : null
   )
-  const traceRows = useSSE<TraceRow>(
+  const { items: traceRows } = useSSE<TraceRow>(
     selectedId !== null ? `/api/sessions/${selectedId}/trace` : null
   )
   const decisions = useDecisions(selectedId)
   const session = sessions.find((s) => s.id === selectedId)
   const isLive = session?.ended_at === null
 
+  function openMinutes() {
+    const html = generateMinutesHTML(session, transcriptRows, traceRows, decisions)
+    if (!html) return
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
+  }
+
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)', padding: 12, gap: 12 }}>
 
       {/* ── Topbar ── */}
       <header style={{
@@ -61,7 +217,8 @@ export default function App() {
         background: 'rgba(255,255,255,0.85)',
         backdropFilter: 'blur(20px) saturate(1.8)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.8)',
-        borderBottom: '1px solid rgba(0,0,0,0.08)',
+        border: '1px solid rgba(0,0,0,0.08)',
+        borderRadius: 12,
         display: 'flex',
         alignItems: 'center',
         padding: '0 16px',
@@ -116,11 +273,38 @@ export default function App() {
             {isLive ? 'Live' : 'Ended'}
           </span>
         )}
+
+        {/* spacer */}
+        <div style={{ flex: 1 }} />
+
+        {session && (
+          <button
+            onClick={openMinutes}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              background: 'linear-gradient(135deg, #6366F1, #8B5CF6)',
+              color: 'white',
+              border: 'none',
+              borderRadius: 20,
+              padding: '5px 14px',
+              fontSize: 12, fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: 'Inter, sans-serif',
+              boxShadow: '0 2px 8px rgba(99,102,241,0.3)',
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M3 2h7l3 3v9a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="white" strokeWidth="1.4" strokeLinejoin="round"/>
+              <path d="M10 2v4h4M5 8h6M5 11h4" stroke="white" strokeWidth="1.2" strokeLinecap="round"/>
+            </svg>
+            Save Minutes
+          </button>
+        )}
       </header>
 
       {/* ── Content ── */}
       {selectedId === null ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10 }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10, background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)' }}>
           <div style={{
             width: 48, height: 48, borderRadius: 12,
             background: 'var(--accent-bg)', border: '1px solid var(--accent-border)',
@@ -148,10 +332,13 @@ export default function App() {
           gap: 0,
           overflow: 'hidden',
           minHeight: 0,
+          background: 'var(--surface)',
+          borderRadius: 12,
+          border: '1px solid var(--border)',
         }}>
           {/* Transcript column */}
           <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid var(--border)' }}>
-            <TranscriptViewer rows={transcriptRows} traceRows={traceRows} />
+            <TranscriptViewer rows={transcriptRows} traceRows={traceRows} partials={partials} />
           </div>
 
           {/* Right column: tool calls + decisions */}

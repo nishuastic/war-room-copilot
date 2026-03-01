@@ -274,7 +274,26 @@ def parse_all_segments(raw_text: str) -> list[TranscriptSegment]:
     return segments
 
 
+def _extract_chunk_text(chunk: ChatChunk) -> str:
+    """Extract text content from a ChatChunk, handling various response formats."""
+    # Try choices[0].delta.content (OpenAI-style)
+    choices = getattr(chunk, "choices", None)
+    if choices:
+        delta = getattr(choices[0], "delta", None)
+        if delta:
+            content = getattr(delta, "content", None)
+            if content:
+                return str(content)
+    # Try direct text_content
+    text = getattr(chunk, "text_content", None) or getattr(chunk, "text", None)
+    if text:
+        return str(text)
+    return ""
+
+
 class WarRoomAgent(Agent):
+    _PARTIAL_THROTTLE_S = 0.15  # minimum interval between partial DB writes
+
     def __init__(
         self,
         instructions: str,
@@ -317,7 +336,21 @@ class WarRoomAgent(Agent):
         tools: list[llm.Tool],
         model_settings: ModelSettings,
     ) -> AsyncIterable[ChatChunk | str]:
-        """Override to route recall queries through BackboardLLM instead of OpenAI."""
+        """Override to route recall queries through BackboardLLM instead of OpenAI.
+
+        Also streams partial text to the DB so the frontend can display
+        Sam's response as it's being generated.
+        """
+        accumulated = ""
+        last_partial_t = 0.0
+
+        async def _emit_partial(text: str) -> None:
+            nonlocal last_partial_t
+            now = time.time()
+            if now - last_partial_t >= self._PARTIAL_THROTTLE_S:
+                last_partial_t = now
+                asyncio.create_task(self._db.upsert_partial(self._session_id, "sam", text))
+
         if self._use_backboard_for_next_reply and self._backboard_llm is not None:
             self._use_backboard_for_next_reply = False
 
@@ -336,17 +369,29 @@ class WarRoomAgent(Agent):
             # Route through BackboardLLM — no tools, Backboard handles RAG + memory
             stream = self._backboard_llm.chat(chat_ctx=chat_ctx, tools=[])
             async for chunk in stream:
+                token = _extract_chunk_text(chunk) if isinstance(chunk, ChatChunk) else ""
+                if token:
+                    accumulated += token
+                    await _emit_partial(accumulated)
                 yield chunk
         else:
             # Default path — delegate to Agent.default.llm_node
             default_stream: Any = Agent.default.llm_node(self, chat_ctx, tools, model_settings)
             if hasattr(default_stream, "__aiter__"):
                 async for chunk in default_stream:
+                    token = _extract_chunk_text(chunk) if isinstance(chunk, ChatChunk) else ""
+                    if token:
+                        accumulated += token
+                        await _emit_partial(accumulated)
                     yield chunk
             else:
                 result = await default_stream
                 if result is not None:
                     yield result
+
+        # Clear Sam's partial once stream is complete
+        if accumulated:
+            asyncio.create_task(self._db.clear_partial(self._session_id, "sam"))
 
     async def _run_silent_skill(
         self, context: str, user_message: str, skill_result: SkillResult
@@ -843,20 +888,26 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     @session.on("user_input_transcribed")
     def _on_user_input_transcribed(ev: Any) -> None:
-        """Fires for ALL final transcripts regardless of scheduling state.
+        """Fires for ALL transcripts (interim + final) regardless of scheduling state.
 
-        This ensures transcripts are logged, stored in memory/SQLite/Backboard,
-        and checked for decisions even when speech scheduling is paused
-        (e.g. during interruptions).  The event fires per-segment (not per-turn),
-        so each invocation typically contains one tagged segment.
+        Final transcripts are logged, stored in memory/SQLite/Backboard,
+        and checked for decisions. Interim transcripts are written to the
+        partials table so the frontend can display live streaming text.
         """
-        # Only process final transcripts (skip interim/partial)
-        if not getattr(ev, "is_final", False):
-            return
+        is_final = getattr(ev, "is_final", False)
         raw_text = getattr(ev, "transcript", "") or ""
         if not raw_text.strip():
             return
-        # Delegate to agent's transcript processing (log + store + track)
+
+        if not is_final:
+            # Write interim partial to DB for live frontend display
+            segment = parse_transcript(raw_text)
+            asyncio.create_task(db.upsert_partial(session_id, segment.speaker_id, segment.text))
+            return
+
+        # Final transcript — clear partial and store as usual
+        segment = parse_transcript(raw_text)
+        asyncio.create_task(db.clear_partial(session_id, segment.speaker_id))
         war_room_agent._process_transcript(raw_text)
 
     @session.on("user_state_changed")

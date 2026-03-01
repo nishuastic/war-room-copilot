@@ -53,6 +53,13 @@ CREATE TABLE IF NOT EXISTS metrics (
     latency_count INTEGER NOT NULL DEFAULT 0,
     timestamp REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS partials (
+    session_id INTEGER NOT NULL,
+    speaker_id TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    timestamp REAL NOT NULL,
+    PRIMARY KEY (session_id, speaker_id)
+);
 CREATE INDEX IF NOT EXISTS idx_transcript_session ON transcript(session_id);
 CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id);
 CREATE INDEX IF NOT EXISTS idx_trace_session ON agent_trace(session_id);
@@ -271,6 +278,30 @@ class IncidentDB:
             "tts_chars": r["tts_chars"],
             "avg_latency_ms": round(avg_latency, 1),
         }
+
+    async def upsert_partial(self, session_id: int, speaker_id: str, text: str) -> None:
+        await self._db().execute(
+            "INSERT INTO partials (session_id, speaker_id, text, timestamp) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(session_id, speaker_id) DO UPDATE "
+            "SET text = excluded.text, timestamp = excluded.timestamp",
+            (session_id, speaker_id, text, time.time()),
+        )
+        await self._db().commit()
+
+    async def clear_partial(self, session_id: int, speaker_id: str) -> None:
+        await self._db().execute(
+            "DELETE FROM partials WHERE session_id = ? AND speaker_id = ?",
+            (session_id, speaker_id),
+        )
+        await self._db().commit()
+
+    async def get_partials(self, session_id: int) -> list[dict[str, Any]]:
+        rows = await self._db().execute_fetchall(
+            "SELECT session_id, speaker_id, text, timestamp FROM partials WHERE session_id = ?",
+            (session_id,),
+        )
+        return [dict(r) for r in rows]
 
     async def close(self) -> None:
         if self._conn:
