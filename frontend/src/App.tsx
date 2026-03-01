@@ -328,7 +328,7 @@ export default function App() {
         <div style={{
           flex: 1,
           display: 'grid',
-          gridTemplateColumns: '62fr 0fr',
+          gridTemplateColumns: '62fr 38fr',
           gap: 0,
           overflow: 'hidden',
           minHeight: 0,
