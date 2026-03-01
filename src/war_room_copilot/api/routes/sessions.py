@@ -35,6 +35,29 @@ def _get_db() -> IncidentDB:
     return _db
 
 
+@router.get("/insights")
+async def get_insights() -> dict[str, Any]:
+    """Cross-session insights: session count, total decisions, recent decisions."""
+    sessions = await _get_db().get_sessions()
+    all_decisions: list[Any] = []
+    for s in sessions:
+        decisions = await _get_db().get_decisions(s["id"])
+        for d in decisions:
+            all_decisions.append(
+                {
+                    **d.model_dump(),
+                    "session_id": s["id"],
+                    "room_name": s["room_name"],
+                }
+            )
+    all_decisions.sort(key=lambda d: d["timestamp"], reverse=True)
+    return {
+        "session_count": len(sessions),
+        "total_decisions": len(all_decisions),
+        "recent_decisions": all_decisions[:20],
+    }
+
+
 @router.get("/sessions")
 async def list_sessions() -> list[dict[str, Any]]:
     return await _get_db().get_sessions()

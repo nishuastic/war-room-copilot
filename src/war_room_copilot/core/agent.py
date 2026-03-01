@@ -379,6 +379,19 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             await long_term.start_session(room_name)
             logger.info("Backboard long-term memory initialized")
 
+            # Inject cross-session context into the agent's system prompt
+            past_context = await long_term.get_session_context()
+            if past_context:
+                prompt += (
+                    f"\n\n[MEMORY FROM PAST SESSIONS]\n{past_context}\n\n"
+                    "When relevant, proactively reference past session context. "
+                    "Example: 'In a previous session, the team decided to roll back Redis to v6...'"
+                )
+                asyncio.create_task(
+                    db.add_trace(session_id, "memory_loaded", {"context": past_context[:2000]})
+                )
+                logger.info("Injected past session context into system prompt")
+
             decision_tracker = DecisionTracker(
                 short_term=memory,
                 long_term=long_term,

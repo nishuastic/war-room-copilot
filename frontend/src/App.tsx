@@ -14,7 +14,7 @@ import './index.css'
 
 const API = '/api'
 
-type RightTab = 'decisions' | 'metrics'
+type RightTab = 'decisions' | 'metrics' | 'insights'
 
 function useDecisions(sessionId: number | null) {
   const [decisions, setDecisions] = useState<DecisionRow[]>([])
@@ -83,6 +83,7 @@ export default function App() {
   const decisions = useDecisions(selectedId)
   const session = sessions.find((s) => s.id === selectedId)
   const isLive = session?.ended_at === null
+  const memoryLoaded = traceRows.some((r) => r.event_type === 'memory_loaded')
 
   const handleExport = async () => {
     if (!selectedId) return
@@ -250,6 +251,21 @@ export default function App() {
         </button>
       </header>
 
+      {/* ── Memory Banner ── */}
+      {memoryLoaded && (
+        <div style={{
+          background: 'rgba(139,92,246,0.08)',
+          borderBottom: '1px solid rgba(139,92,246,0.25)',
+          padding: '6px 20px',
+          display: 'flex', alignItems: 'center', gap: 8,
+          fontSize: 12, color: '#a78bfa', fontWeight: 500,
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 14 }}>🧠</span>
+          Memory: Loaded context from past sessions
+        </div>
+      )}
+
       {/* ── Content ── */}
       {selectedId === null ? (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10 }}>
@@ -309,11 +325,18 @@ export default function App() {
                 color="var(--accent)"
                 onClick={() => setRightTab('metrics')}
               />
+              <Tab
+                label="Insights"
+                active={rightTab === 'insights'}
+                color="#a78bfa"
+                onClick={() => setRightTab('insights')}
+              />
             </div>
 
             {/* Tab content */}
             <div style={{ flex: 1, overflow: 'auto', padding: '4px 14px 14px' }}>
               {rightTab === 'decisions' && <DecisionList decisions={decisions} />}
+              {rightTab === 'insights' && <InsightsPanel />}
               {rightTab === 'metrics' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <BusinessMetrics sessionId={selectedId} />
@@ -400,6 +423,52 @@ function StatPill({ label, value, color }: { label: string; value: number; color
     }}>
       <span style={{ fontSize: 12, fontWeight: 700, color }}>{value}</span>
       <span style={{ fontSize: 11, color: 'var(--text-4)', fontWeight: 500 }}>{label}</span>
+    </div>
+  )
+}
+
+type InsightDecision = {
+  id: string; text: string; speaker_id: string; confidence: number;
+  timestamp: number; session_id: number; room_name: string;
+}
+
+function InsightsPanel() {
+  const [data, setData] = useState<{ session_count: number; total_decisions: number; recent_decisions: InsightDecision[] } | null>(null)
+  useEffect(() => {
+    fetch(`${API}/insights`).then(r => r.json()).then(setData).catch(console.error)
+  }, [])
+
+  if (!data) return <div style={{ color: 'var(--text-4)', fontSize: 12, padding: '12px 0' }}>Loading insights…</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 12 }}>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <StatPill label="Sessions" value={data.session_count} color="#a78bfa" />
+        <StatPill label="All Decisions" value={data.total_decisions} color="var(--green)" />
+      </div>
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+          Recent Decisions (all sessions)
+        </div>
+        {data.recent_decisions.length === 0 ? (
+          <div style={{ color: 'var(--text-4)', fontSize: 12 }}>No decisions yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {data.recent_decisions.map(d => (
+              <div key={d.id} style={{
+                background: 'var(--surface-2)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)', padding: '7px 10px',
+                fontSize: 12,
+              }}>
+                <div style={{ color: 'var(--text-1)', marginBottom: 3 }}>{d.text}</div>
+                <div style={{ color: 'var(--text-4)', fontSize: 10 }}>
+                  Session #{d.session_id} · {d.room_name} · {d.speaker_id} · {Math.round(d.confidence * 100)}%
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

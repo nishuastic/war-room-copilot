@@ -1,7 +1,7 @@
 # War Room Copilot — Developer Guide
 
 ## Quick Start
-uv sync && uv run python -m src.war_room_copilot.core.agent dev
+uv sync --extra dev && uv run python -m src.war_room_copilot.core.agent dev
 
 ## Linting & Formatting
 uv run ruff check src/ --fix

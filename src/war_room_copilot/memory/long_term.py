@@ -41,8 +41,12 @@ class LongTermMemory:
         assistant: Any = await self._client.create_assistant(
             name="War Room Copilot",
             system_prompt=(
-                "You are a memory assistant for a production incident war room. "
-                "You store and recall information about incidents, decisions, and context."
+                "You are the persistent memory for an engineering war room copilot. "
+                "Prioritize remembering: engineering decisions and their rationale, "
+                "incident root causes and resolutions, action items and owners, "
+                "recurring patterns across incidents (e.g. 'Redis issues', 'deploy failures'), "
+                "and team-specific context (services, infrastructure, on-call owners). "
+                "Deprioritize: general discussion, filler conversation, unresolved speculation."
             ),
         )
         self._assistant_id = str(assistant.assistant_id)
@@ -100,6 +104,30 @@ class LongTermMemory:
             return "No relevant memories found."
         text = response.content or response.message or ""
         return str(text) if text else "No relevant memories found."
+
+    async def get_session_context(self) -> str:
+        """Query Backboard for relevant context from past sessions (read-only, fast)."""
+        assert self._thread_id is not None
+        try:
+            response: Any = await self._client.add_message(
+                thread_id=self._thread_id,
+                content=(
+                    "Summarize the most important decisions, incidents, and action items "
+                    "from previous sessions. Focus on: recurring patterns, unresolved issues, "
+                    "and key technical decisions. Be concise."
+                ),
+                llm_provider="openai",
+                model_name=LLM_MODEL,
+                memory="readonly",
+                stream=False,
+            )
+            if not response:
+                return ""
+            text = response.content or response.message or ""
+            return str(text) if text else ""
+        except Exception:
+            logger.warning("Failed to load past session context from Backboard", exc_info=True)
+            return ""
 
     async def close(self) -> None:
         """Clean up client resources."""
