@@ -30,7 +30,8 @@ COPY --from=builder /app/src src
 COPY --from=builder /app/assets assets
 COPY --from=builder /app/pyproject.toml .
 
-ENV PATH="/app/.venv/bin:$PATH" \
+ENV PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH" \
     HOME=/app
 
 ENTRYPOINT ["python", "-m", "src.war_room_copilot.core.agent"]

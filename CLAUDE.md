@@ -112,6 +112,8 @@ See @docs/architecture.md for diagrams and detailed design. See @docs/PLAN_V0.md
 10. **Two LLM factories** — `llm.create_llm()` returns LiveKit plugins (voice loop); `graph.llm.get_graph_llm()` returns LangChain models (reasoning loop). Both read from the same `LLM_PROVIDER`/`LLM_MODEL` config
 11. **Graph LLM is cached** — `get_graph_llm()` uses `@lru_cache`; call `get_graph_llm.cache_clear()` in tests
 12. **`_session_state` is module-level** — in `livekit.py`, accumulates across graph invocations within a session; reset on agent restart
+13. **Docker logging requires `PYTHONUNBUFFERED=1`** — without it, Python block-buffers stdout in non-TTY containers and logs vanish. Always set in Dockerfile.
+14. **Use `start` not `dev` in Docker** — `dev` mode uses watchfiles which spawns child processes via `multiprocessing.spawn`; their stdout goes to internal pipes that Docker can't capture. `start` runs directly and logs are visible. Reserve `dev` for local terminal use only.
 
 ## File Maintenance Rules
 
