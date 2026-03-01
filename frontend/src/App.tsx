@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { TranscriptViewer } from './components/TranscriptViewer'
-import { AgentTrace } from './components/AgentTrace'
 import { DecisionList } from './components/DecisionList'
 import { BusinessMetrics } from './components/BusinessMetrics'
 import { IssueAnalytics } from './components/IssueAnalytics'
@@ -10,11 +9,12 @@ import { useSessions, useLatestSessionId } from './hooks/useSessions'
 import type { TranscriptRow } from './components/TranscriptViewer'
 import type { TraceRow } from './components/AgentTrace'
 import type { DecisionRow } from './components/DecisionList'
+
 import './index.css'
 
 const API = '/api'
 
-type RightTab = 'trace' | 'decisions' | 'metrics'
+type RightTab = 'decisions' | 'metrics'
 
 function useDecisions(sessionId: number | null) {
   const [decisions, setDecisions] = useState<DecisionRow[]>([])
@@ -67,7 +67,7 @@ export default function App() {
   const { sessions, loading } = useSessions()
   const latestId = useLatestSessionId()
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [rightTab, setRightTab] = useState<RightTab>('trace')
+  const [rightTab, setRightTab] = useState<RightTab>('decisions')
   const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
@@ -111,7 +111,7 @@ export default function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 4 }}>
           <div style={{
             width: 28, height: 28, borderRadius: 7,
-            background: 'linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%)',
+            background: 'linear-gradient(135deg, var(--accent) 0%, #3b82f6 100%)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 14, boxShadow: '0 2px 8px var(--accent-border)',
           }}>⚔️</div>
@@ -165,8 +165,8 @@ export default function App() {
         {session && (
           <div style={{ display: 'flex', gap: 6 }}>
             <StatPill label="Turns" value={transcriptRows.length} color="var(--accent)" />
-            <StatPill label="Events" value={traceRows.length} color="#8b5cf6" />
             <StatPill label="Decisions" value={decisions.length} color="var(--green)" />
+            <StatPill label="Events" value={traceRows.length} color="var(--text-3)" />
           </div>
         )}
 
@@ -270,13 +270,13 @@ export default function App() {
           padding: 12,
           overflow: 'hidden',
         }}>
-          {/* Transcript — full height left */}
+          {/* Transcript — full height left, with trace events merged in */}
           <Panel
             title="Transcript"
             count={transcriptRows.length}
             accentColor="var(--accent)"
           >
-            <TranscriptViewer rows={transcriptRows} />
+            <TranscriptViewer rows={transcriptRows} traceRows={traceRows} />
           </Panel>
 
           {/* Right column: tabbed panel */}
@@ -297,13 +297,6 @@ export default function App() {
               flexShrink: 0,
             }}>
               <Tab
-                label="Trace"
-                count={traceRows.length}
-                active={rightTab === 'trace'}
-                color="#8b5cf6"
-                onClick={() => setRightTab('trace')}
-              />
-              <Tab
                 label="Decisions"
                 count={decisions.length}
                 active={rightTab === 'decisions'}
@@ -320,7 +313,6 @@ export default function App() {
 
             {/* Tab content */}
             <div style={{ flex: 1, overflow: 'auto', padding: '4px 14px 14px' }}>
-              {rightTab === 'trace' && <AgentTrace rows={traceRows} />}
               {rightTab === 'decisions' && <DecisionList decisions={decisions} />}
               {rightTab === 'metrics' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -379,7 +371,7 @@ function Tab({
           background: active ? color : 'var(--border)',
           color: active ? 'white' : 'var(--text-4)',
           borderRadius: 8, padding: '1px 5px',
-          fontFamily: 'JetBrains Mono, monospace',
+          fontFamily: 'ui-monospace, monospace',
         }}>{count}</span>
       )}
     </button>
@@ -449,7 +441,7 @@ function Panel({
           fontSize: 11, fontWeight: 600, color: 'var(--text-4)',
           background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 4, padding: '1px 6px',
-          fontFamily: 'JetBrains Mono, monospace',
+          fontFamily: 'ui-monospace, monospace',
         }}>
           {count}
         </div>
