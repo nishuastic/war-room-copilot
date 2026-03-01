@@ -95,14 +95,15 @@ async def get_commit_diff(commit_sha: str, repo: str | None = None) -> str:
     def _fetch() -> str:
         r = g.get_repo(repo_name)
         commit = r.get_commit(commit_sha)
+        files = list(commit.files) if commit.files else []
         lines: list[str] = [
             f"Commit: {commit.sha[:7]} by "
             f"{commit.commit.author.name if commit.commit.author else 'unknown'}",
             f"Message: {commit.commit.message.split(chr(10))[0]}",
-            f"Files changed: {len(commit.files) if commit.files else 0}",
+            f"Files changed: {len(files)}",
             "",
         ]
-        for f in commit.files or []:
+        for f in files:
             lines.append(f"--- {f.filename} ({f.status}, +{f.additions}/-{f.deletions})")
             if f.patch:
                 lines.append(f.patch)
