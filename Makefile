@@ -3,20 +3,25 @@
 NODE_IP ?= $(shell ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $$1}')
 export NODE_IP
 
-.PHONY: up down restart logs token
+.PHONY: up down restart logs token kill-orphans
 
-up:
+# Kill orphaned Python workers from previous `dev` mode runs before starting
+# Docker. These zombies connect to :7880 and steal jobs from the real agent.
+kill-orphans:
+	@./scripts/kill-orphan-workers.sh
+
+up: kill-orphans
 	@echo "NODE_IP=$(NODE_IP)"
 	docker compose up --build
 
-up-d:
+up-d: kill-orphans
 	@echo "NODE_IP=$(NODE_IP)"
 	docker compose up --build -d
 
 down:
 	docker compose down
 
-restart:
+restart: kill-orphans
 	docker compose down && NODE_IP=$(NODE_IP) docker compose up -d
 
 logs:
