@@ -21,19 +21,17 @@ This starts three services:
 | `github-mcp-server` | GitHub API tools via MCP (HTTP sidecar) |
 | `agent` | War Room Copilot voice agent + dashboard API |
 
-Then generate a token and connect:
+Then open the playground and connect:
 
 ```bash
-docker compose exec agent python -c "
-from livekit.api import AccessToken, VideoGrants
-t = AccessToken('devkey', 'secret')
-t.with_identity('user1')
-t.with_grants(VideoGrants(room_join=True, room='test-room'))
-print(t.to_jwt())
-"
+make playground                    # generates token, copies to clipboard, opens Chrome
 ```
 
-Open the [LiveKit Agents Playground](https://agents-playground.livekit.io/), click **Manual**, set the URL to `ws://localhost:7880`, paste the token, and click **Connect**.
+In the [LiveKit Agents Playground](https://agents-playground.livekit.io/), click **Manual**, paste `ws://localhost:7880` as the URL, paste the token from your clipboard (Cmd+V), and click **Connect**.
+
+To use a custom room name: `make playground ROOM=my-room`
+
+To stop everything: `make down`
 
 ## Environment Variables
 

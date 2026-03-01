@@ -41,10 +41,13 @@ This project uses [beads](https://github.com/steveyegge/beads) for git-backed ta
 
 | Task | Command |
 | ---- | ------- |
-| **Run app** | `make up` (auto-detects LAN IP) |
+| **Run app** | `make up` (auto-detects LAN IP, kills orphan workers) |
 | **Run app (detached)** | `make up-d` |
+| **Open Playground** | `make playground` (generates token, copies to clipboard, opens Chrome) |
+| **Open Playground (custom room)** | `make playground ROOM=my-room` |
 | **View logs** | `make logs` |
 | **Generate token** | `make token` |
+| **Kill orphan workers** | `make kill-orphans` (auto-runs before `up`/`up-d`/`restart`) |
 | **Stop** | `make down` |
 | **Full restart** | `make restart` |
 | **Stop + wipe volumes** | `docker compose down -v` |
