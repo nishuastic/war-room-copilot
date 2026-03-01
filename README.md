@@ -46,7 +46,7 @@ make livekit mode:prod   # uses /etc/livekit.yaml instead of --dev
 - Python 3.12+, Node.js 18+
 - [Homebrew](https://brew.sh/)
 - [uv](https://docs.astral.sh/uv/)
-- API keys: OpenAI, Speechmatics, ElevenLabs, GitHub (personal access token), Backboard (optional)
+- API keys: OpenAI, Speechmatics (STT + TTS), GitHub (personal access token), Backboard (optional)
 
 ### 1. Install dependencies
 
@@ -62,7 +62,7 @@ cd frontend && npm install && cd ..
 cp .env.example .env
 ```
 
-Edit `.env` and set your `OPENAI_API_KEY`, `SPEECHMATICS_API_KEY`, `ELEVENLABS_API_KEY`, and `GITHUB_TOKEN`. Optionally set `BACKBOARD_API_KEY` for cross-session memory and decision tracking. The LiveKit defaults are already configured for local dev. Also set `GITHUB_ALLOWED_REPOS` in `src/war_room_copilot/config.py` to the repos you want the agent to access.
+Edit `.env` and set your `OPENAI_API_KEY`, `SPEECHMATICS_API_KEY`, and `GITHUB_TOKEN`. Optionally set `BACKBOARD_API_KEY` for cross-session memory and decision tracking. The LiveKit defaults are already configured for local dev. Also set `GITHUB_ALLOWED_REPOS` in `src/war_room_copilot/config.py` to the repos you want the agent to access.
 
 **GitHub token scope:** The read-only tools (`search_code`, `get_recent_commits`, etc.) need `public_repo` or `repo`. The write tools (`create_github_issue`, `revert_commit`, `close_pull_request`) additionally require the full **`repo`** scope — go to GitHub → Settings → Developer Settings → Personal Access Tokens → edit your token → check **repo**.
 
@@ -154,7 +154,7 @@ uv run python -m src.war_room_copilot.core.agent console
 ## Architecture
 
 ```
-LiveKit Room → Speechmatics STT (diarization + speaker ID + custom vocab) → GPT-4.1-mini (+ GitHub tools) → ElevenLabs TTS → LiveKit Room
+LiveKit Room → Speechmatics STT (diarization + speaker ID + custom vocab) → GPT-4.1-mini (+ GitHub tools) → Speechmatics TTS → LiveKit Room
 ```
 
 Stage 1 adds incident reasoning, custom STT dictionary, centralized config, and a wake word (`"sam"`). Stage 2 adds **GitHub tools** (search code, commits, PRs, files, blame) via PyGitHub and upgrades the LLM to **GPT-4.1-mini**. Stage 3 adds **memory and decision tracking** — structured short-term transcript memory, Backboard.io for cross-session recall, LLM-based decision detection, and SQLite persistence. Stage 6 adds a **real-time dashboard** — FastAPI REST + SSE server backed by SQLite WAL, and a React + Vite frontend showing live transcript, agent trace, incident timeline, and decisions. Stage 7 adds **skill routing** — a fast GPT-4.1-nano classifier routes each request to a specialized skill (debug, ideate, investigate, recall, summarize, general) with confidence gating that controls whether the agent speaks aloud, silently pushes insights to the dashboard, or discards low-confidence results.

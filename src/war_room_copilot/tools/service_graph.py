@@ -4,26 +4,20 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 
 from livekit.agents import function_tool
 
-logger = logging.getLogger(__name__)
+from ..config import MOCK_DATA_DIR
+from ._util import truncate
 
-_MOCK_DATA_DIR = Path(__file__).parent.parent.parent.parent / "mock_data"
+logger = logging.getLogger(__name__)
 
 
 def _load_graph() -> dict:
-    path = _MOCK_DATA_DIR / "service_graph.json"
+    path = MOCK_DATA_DIR / "service_graph.json"
     if path.exists():
         return json.loads(path.read_text())
     return {"services": {}, "dependency_graph": {}, "incident_impact": {}}
-
-
-def _truncate(text: str, limit: int = 2000) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit] + f"\n... [truncated at {limit} chars]"
 
 
 @function_tool()
@@ -60,7 +54,7 @@ async def get_service_graph() -> str:
         lines.append(f"  Partially degraded: {', '.join(impact.get('partial_impact', []))}")
         lines.append(f"  Unaffected: {', '.join(impact.get('unaffected', []))}")
 
-    return _truncate("\n".join(lines))
+    return truncate("\n".join(lines))
 
 
 @function_tool()

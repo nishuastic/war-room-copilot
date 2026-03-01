@@ -12,5 +12,9 @@ wheels/
 # Environment variables
 .env
 
+# SQLite WAL temp files
+*.db-shm
+*.db-wal
+
 # Models
 .models/

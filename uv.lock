@@ -1098,18 +1098,6 @@ wheels = [
 ]
 
 [[package]]
-name = "livekit-plugins-elevenlabs"
-version = "1.4.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "livekit-agents", extra = ["codecs"] },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/49/87/0f5d3371c8323b2f879d3421963980126f5136a35f069a2b19acfe22c7d5/livekit_plugins_elevenlabs-1.4.3.tar.gz", hash = "sha256:8e7a0e73447f746ac2c35b28ada83167623be8212675a37cb147c6ba74e678c6", size = 16952, upload-time = "2026-02-23T04:03:09.341Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1f/dd/56caf6b08880a824ed04a867ce72f47b40309d7891176941251bb5a548f1/livekit_plugins_elevenlabs-1.4.3-py3-none-any.whl", hash = "sha256:48bd49ea8ab6f4333bc10686ae1e1c7837830ee8d97cec907f15f61941e81a71", size = 19526, upload-time = "2026-02-23T04:03:08.065Z" },
-]
-
-[[package]]
 name = "livekit-plugins-openai"
 version = "1.4.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2514,7 +2502,6 @@ dependencies = [
     { name = "ddtrace" },
     { name = "fastapi" },
     { name = "livekit-agents", extra = ["openai"] },
-    { name = "livekit-plugins-elevenlabs" },
     { name = "livekit-plugins-silero" },
     { name = "livekit-plugins-speechmatics" },
     { name = "openai" },
@@ -2540,7 +2527,6 @@ requires-dist = [
     { name = "ddtrace", specifier = ">=2.0" },
     { name = "fastapi", specifier = ">=0.111" },
     { name = "livekit-agents", extras = ["openai"], specifier = ">=1.0" },
-    { name = "livekit-plugins-elevenlabs" },
     { name = "livekit-plugins-silero" },
     { name = "livekit-plugins-speechmatics" },
     { name = "mypy", marker = "extra == 'dev'" },

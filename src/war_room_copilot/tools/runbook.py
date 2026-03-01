@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import yaml
 from livekit.agents import function_tool
 
+from ..config import RUNBOOKS_FILE
+
 logger = logging.getLogger(__name__)
 
-_RUNBOOKS_PATH = Path(__file__).parent.parent.parent.parent / "mock_data" / "runbooks.yaml"
 _runbooks_cache: list[dict] | None = None
 
 
@@ -18,12 +18,23 @@ def _load_runbooks() -> list[dict]:
     global _runbooks_cache
     if _runbooks_cache is not None:
         return _runbooks_cache
-    if not _RUNBOOKS_PATH.exists():
-        logger.warning("runbooks.yaml not found at %s", _RUNBOOKS_PATH)
+    if not RUNBOOKS_FILE.exists():
+        logger.warning(
+            "runbooks.yaml not found at %s (resolved: %s)",
+            RUNBOOKS_FILE,
+            RUNBOOKS_FILE.resolve(),
+        )
         return []
-    with _RUNBOOKS_PATH.open() as f:
+    with RUNBOOKS_FILE.open() as f:
         data = yaml.safe_load(f)
-    _runbooks_cache = data.get("runbooks", []) if isinstance(data, dict) else []
+    # runbooks.yaml is a list at the top level, not a dict
+    if isinstance(data, list):
+        _runbooks_cache = data
+    elif isinstance(data, dict):
+        _runbooks_cache = data.get("runbooks", [])
+    else:
+        _runbooks_cache = []
+    logger.info("Loaded %d runbooks from %s", len(_runbooks_cache), RUNBOOKS_FILE)
     return _runbooks_cache
 
 

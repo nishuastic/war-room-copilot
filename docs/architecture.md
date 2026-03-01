@@ -17,8 +17,8 @@ flowchart LR
         SR[Skill Router<br/>GPT-4.1-nano]
         CG{Confidence<br/>Gate}
         LLM[GPT-4.1-mini<br/>Incident Reasoning]
-        Tools[GitHub Tools<br/>search, commits, PRs, blame]
-        TTS[ElevenLabs TTS]
+        Tools[Tool Registry<br/>26 tools via ALL_TOOLS]
+        TTS[Speechmatics TTS]
     end
 
     subgraph Memory
@@ -38,12 +38,13 @@ flowchart LR
         React[React + Vite<br/>port 5173]
         TV[Transcript Viewer]
         AT[Agent Trace]
-        IT[Incident Timeline]
         DL[Decision List]
     end
 
     subgraph External
         GH[GitHub API]
+        DD[Datadog API]
+        Cloud[AWS/GCP/Azure Logs]
         BB[Backboard API]
     end
 
@@ -75,7 +76,11 @@ flowchart LR
     LLM -- "recall_decision" --> DB
     LLM -- "recall_decision" --> LTM
     Tools -- "PyGitHub (REST)" --> GH
+    Tools -- "Datadog SDK" --> DD
+    Tools -- "SDK calls" --> Cloud
     GH -- results --> Tools
+    DD -- results --> Tools
+    Cloud -- results --> Tools
     Tools -- "tool result" --> LLM
     LLM -- response --> TTS
     TTS -- audio --> User
@@ -86,13 +91,12 @@ flowchart LR
     SSE -- EventSource --> React
     React --> TV
     React --> AT
-    React --> IT
     React --> DL
 ```
 
 ## Current Stage: 7
 
-Stage 7 combines **intent-based skill routing** and **business metrics**. A fast GPT-4.1-nano classifier routes each wake-word request to a skill (debug, ideate, investigate, recall, summarize, or general) with confidence gating: speak (>0.7), silent dashboard push (0.4–0.7), or discard (<0.4). The agent also tracks wake-word → response latency, LLM call counts, token usage, and TTS character counts in a `metrics` DB table. At session end, post-mortem interview mode asks 3 structured questions via TTS. The API exposes four new endpoints: `/metrics`, `/analytics`, `/runbooks`, and `/summary`. The dashboard has a tabbed right panel (Decisions / Metrics) with `BusinessMetrics`, `IssueAnalytics`, and `RunbookPanel` components, agent trace events merged inline into the transcript timeline, and an "Export Post-Mortem" button.
+Stage 7 combines **intent-based skill routing** and **business metrics**. A fast GPT-4.1-nano classifier routes each wake-word request to a skill (debug, ideate, investigate, recall, or general) with confidence gating: speak (>0.7), silent dashboard push (0.4–0.7), or discard (<0.4). The agent also tracks wake-word → response latency, LLM call counts, token usage, and TTS character counts in a `metrics` DB table. At session end, post-mortem interview mode asks 3 structured questions via TTS. The API exposes four new endpoints: `/metrics`, `/analytics`, `/runbooks`, and `/summary`. The dashboard has a tabbed right panel (Decisions / Metrics) with `BusinessMetrics`, `IssueAnalytics`, and `RunbookPanel` components, agent trace events merged inline into the transcript timeline, and an "Export Post-Mortem" button.
 
 ### Features
 - Speaker diarization (who said what)
@@ -108,7 +112,7 @@ Stage 7 combines **intent-based skill routing** and **business metrics**. A fast
 - **SQLite persistence** — local store for call metadata, transcript history, and decisions (`.data/war_room.db`)
 - **Recall tool** — `recall_decision` function tool for querying past decisions across sessions
 - **Dynamic prompt** with room name, known speakers, and allowed repos injected
-- **Skill routing** — LLM-based intent classification (6 skills) with confidence gating (speak / silent dashboard push / discard)
+- **Skill routing** — LLM-based intent classification (5 skills) with confidence gating (speak / silent dashboard push / discard)
 - **Multi-LLM ready** — per-skill model config in `config.py` (all default to GPT-4.1-mini, easily swappable)
 - **Centralized config** — all tunables in `config.py`
 
@@ -117,15 +121,24 @@ Stage 7 combines **intent-based skill routing** and **business metrics**. A fast
 | Component | File | Purpose |
 |-----------|------|---------|
 | Agent | `src/war_room_copilot/core/agent.py` | LiveKit agent entry point, `WarRoomAgent` class |
-| Skill Router | `src/war_room_copilot/skills/router.py` | Intent classification via GPT-4.1-nano (debug, ideate, investigate, recall, summarize, general) |
+| Skill Router | `src/war_room_copilot/skills/router.py` | Intent classification via GPT-4.1-nano (debug, ideate, investigate, recall, general) |
 | Skill Prompts | `src/war_room_copilot/skills/prompts.py` | Per-skill prompt suffixes appended to base agent.md |
-| GitHub Tools | `src/war_room_copilot/tools/github.py` | 7 `@function_tool` functions for GitHub API access |
+| Tool Registry | `src/war_room_copilot/tools/__init__.py` | `ALL_TOOLS` dict of all 26 tools, auto-imported from submodules |
+| Tool Utilities | `src/war_room_copilot/tools/_util.py` | Shared `truncate()` and `run_github()` helpers |
+| Schema Generator | `src/war_room_copilot/tools/_registry.py` | Auto-generates OpenAI tool schemas from `FunctionTool` metadata |
+| GitHub Tools | `src/war_room_copilot/tools/github.py` | 10 `@function_tool` functions for GitHub API (read + write) |
+| Datadog Tools | `src/war_room_copilot/tools/datadog.py` | 4 `@function_tool` functions for Datadog metrics, logs, APM, monitors |
+| Cloud Log Tools | `src/war_room_copilot/tools/logs.py` | 7 `@function_tool` functions for AWS/GCP/Azure logs |
+| Service Graph Tools | `src/war_room_copilot/tools/service_graph.py` | 3 `@function_tool` functions for service dependency graph and health |
+| Runbook Tool | `src/war_room_copilot/tools/runbook.py` | `search_runbook` function tool for keyword-matched runbook lookup |
 | Recall Tool | `src/war_room_copilot/tools/recall.py` | `recall_decision` function tool for querying past decisions |
+| Investigation Runner | `src/war_room_copilot/skills/investigation.py` | Background OpenAI tool-calling loop using all 26 tools via `ALL_TOOLS` |
 | Short-Term Memory | `src/war_room_copilot/memory/short_term.py` | Sliding window of `TranscriptSegment` objects |
 | Long-Term Memory | `src/war_room_copilot/memory/long_term.py` | Backboard.io wrapper for persistent cross-session memory |
 | Decision Tracker | `src/war_room_copilot/memory/decisions.py` | LLM-based decision detection via Backboard |
 | SQLite DB | `src/war_room_copilot/memory/db.py` | `IncidentDB` for sessions, transcript, decisions, and agent_trace (WAL mode) |
 | API Server | `src/war_room_copilot/api/main.py` | FastAPI server — REST + SSE observability layer |
+| API Dependencies | `src/war_room_copilot/api/deps.py` | FastAPI `Depends(get_db)` for DB dependency injection |
 | REST Routes | `src/war_room_copilot/api/routes/sessions.py` | GET /sessions, /transcript, /decisions, /metrics, /analytics, /runbooks, /summary |
 | SSE Routes | `src/war_room_copilot/api/routes/stream.py` | SSE /sessions/{id}/stream, /trace, /latest/id |
 | Dashboard | `frontend/` | React + Vite — TranscriptViewer, AgentTrace, DecisionList, BusinessMetrics, IssueAnalytics, RunbookPanel |
@@ -147,7 +160,7 @@ Stage 7 combines **intent-based skill routing** and **business metrics**. A fast
 5. Wake word check (`"sam"`):
    - **No wake word**: `StopResponse` cancels auto-reply
    - **Wake word detected**: proceeds to skill routing
-6. Skill Router (GPT-4.1-nano) classifies intent into one of 6 skills with confidence score
+6. Skill Router (GPT-4.1-nano) classifies intent into one of 5 skills with confidence score
 7. Confidence gating:
    - **< 0.4**: discard silently
    - **0.4–0.7**: run skill via Backboard (silent), push result to dashboard via `silent_skill_response` trace
@@ -155,7 +168,7 @@ Stage 7 combines **intent-based skill routing** and **business metrics**. A fast
 8. Dynamic prompt is built with room name, known speaker names, allowed repos, and skill suffix
 9. GPT-4.1-mini reasons about the incident; may call GitHub tools or `recall_decision`
 10. `recall_decision` searches SQLite (local decisions) + Backboard (cross-session memory)
-11. ElevenLabs TTS converts response to audio
+11. Speechmatics TTS converts response to audio
 12. Audio sent back to LiveKit room
 13. Background task captures speaker voiceprints every 30s for future identification
 14. On disconnect: session end time stored, resources cleaned up
@@ -168,7 +181,7 @@ Stage 7 combines **intent-based skill routing** and **business metrics**. A fast
 | STT | Speechmatics (Enhanced) | Enhanced mode for better accuracy, diarization, speaker ID, smart turn detection, custom vocab |
 | LLM | GPT-4.1-mini | Fast, cheap, better tool-calling than 4o-mini |
 | GitHub tools | PyGitHub (REST) | No local cloning needed, `asyncio.to_thread` for non-blocking |
-| TTS | ElevenLabs | Natural voice quality |
+| TTS | Speechmatics | Single vendor for STT + TTS |
 | VAD | Silero | Lightweight, runs locally (ONNX) |
 | Short-term memory | `collections.deque` | Simple sliding window, O(1) append, bounded size |
 | Long-term memory | Backboard.io | LLM routing + auto memory, persistent across sessions |
@@ -180,4 +193,4 @@ Stage 7 combines **intent-based skill routing** and **business metrics**. A fast
 
 ## Planned (Future Stages)
 
-See [PLAN_V0.md](PLAN_V0.md) for the full roadmap: skills router, multi-LLM, auto-interjection, contradiction detection, dashboard, Datadog integration.
+Auto-interjection, contradiction detection, advanced analytics.

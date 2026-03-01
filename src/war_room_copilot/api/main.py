@@ -21,8 +21,7 @@ logger = logging.getLogger("war-room-api")
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     db = IncidentDB(DB_FILE)
     await db.initialize()
-    sessions_routes.set_db(db)
-    stream_routes.set_db(db)
+    app.state.db = db
     logger.info("DB opened: %s", DB_FILE)
     yield
     await db.close()

@@ -1,8 +1,35 @@
 """Centralized configuration for War Room Copilot."""
 
+import subprocess
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parents[2]
+
+def _find_project_root() -> Path:
+    """Find project root robustly — works in LiveKit subprocess too."""
+    # First try __file__ based resolution
+    candidate = Path(__file__).resolve().parents[2]
+    if (candidate / "pyproject.toml").exists():
+        return candidate
+    # Fall back to git root (handles subprocess CWD changes)
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return Path(result.stdout.strip())
+    except Exception:
+        pass
+    # Last resort: walk up from CWD
+    cwd = Path.cwd()
+    for parent in [cwd, *cwd.parents]:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    return candidate
+
+
+PROJECT_ROOT = _find_project_root()
 
 # LLM
 LLM_MODEL = "gpt-4.1"
@@ -61,8 +88,25 @@ GPT4_MINI_OUTPUT_COST_PER_1K = 0.0006  # $0.60/1M tokens
 SPEECHMATICS_TTS_COST_PER_CHAR = 0.000011  # $0.011/1k chars
 CARBON_G_PER_LLM_CALL = 0.2  # ~0.2g CO2 per call
 
+# Tool output
+TOOL_OUTPUT_CHAR_LIMIT = 2000
+
+# Context windows
+ROUTER_CONTEXT_CHARS = 2000
+INVESTIGATION_CONTEXT_CHARS = 1500
+
+# GitHub
+GITHUB_RESULT_LIMIT = 10
+GITHUB_COMMIT_MSG_TRUNCATE = 80
+
+# Investigation
+MAX_INVESTIGATION_ROUNDS = 6
+
+# Mock data
+MOCK_DATA_DIR = PROJECT_ROOT / "mock_data"
+
 # Runbooks
-RUNBOOKS_FILE = PROJECT_ROOT / "mock_data" / "runbooks.yaml"
+RUNBOOKS_FILE = MOCK_DATA_DIR / "runbooks.yaml"
 
 # Datadog
 # Get these from: datadoghq.com → Organization Settings → API Keys / Application Keys

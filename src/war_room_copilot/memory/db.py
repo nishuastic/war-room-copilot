@@ -48,11 +48,15 @@ CREATE TABLE IF NOT EXISTS metrics (
     llm_calls INTEGER NOT NULL DEFAULT 0,
     total_input_tokens INTEGER NOT NULL DEFAULT 0,
     total_output_tokens INTEGER NOT NULL DEFAULT 0,
-    elevenlabs_chars INTEGER NOT NULL DEFAULT 0,
+    tts_chars INTEGER NOT NULL DEFAULT 0,
     latency_ms_sum REAL NOT NULL DEFAULT 0,
     latency_count INTEGER NOT NULL DEFAULT 0,
     timestamp REAL NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_transcript_session ON transcript(session_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id);
+CREATE INDEX IF NOT EXISTS idx_trace_session ON agent_trace(session_id);
+CREATE INDEX IF NOT EXISTS idx_metrics_session ON metrics(session_id);
 """
 
 
@@ -196,7 +200,7 @@ class IncidentDB:
         llm_calls: int = 0,
         input_tokens: int = 0,
         output_tokens: int = 0,
-        elevenlabs_chars: int = 0,
+        tts_chars: int = 0,
         latency_ms: float = 0.0,
     ) -> None:
         existing = await self._db().execute_fetchall(
@@ -209,7 +213,7 @@ class IncidentDB:
                     llm_calls = llm_calls + ?,
                     total_input_tokens = total_input_tokens + ?,
                     total_output_tokens = total_output_tokens + ?,
-                    elevenlabs_chars = elevenlabs_chars + ?,
+                    tts_chars = tts_chars + ?,
                     latency_ms_sum = latency_ms_sum + ?,
                     latency_count = latency_count + ?,
                     timestamp = ?
@@ -218,7 +222,7 @@ class IncidentDB:
                     llm_calls,
                     input_tokens,
                     output_tokens,
-                    elevenlabs_chars,
+                    tts_chars,
                     latency_ms,
                     latency_count_add,
                     time.time(),
@@ -229,14 +233,14 @@ class IncidentDB:
             await self._db().execute(
                 """INSERT INTO metrics
                     (session_id, llm_calls, total_input_tokens, total_output_tokens,
-                     elevenlabs_chars, latency_ms_sum, latency_count, timestamp)
+                     tts_chars, latency_ms_sum, latency_count, timestamp)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     llm_calls,
                     input_tokens,
                     output_tokens,
-                    elevenlabs_chars,
+                    tts_chars,
                     latency_ms,
                     1 if latency_ms > 0 else 0,
                     time.time(),
@@ -255,7 +259,7 @@ class IncidentDB:
                 "llm_calls": 0,
                 "total_input_tokens": 0,
                 "total_output_tokens": 0,
-                "elevenlabs_chars": 0,
+                "tts_chars": 0,
                 "avg_latency_ms": 0.0,
             }
         r = rows[0]
@@ -264,7 +268,7 @@ class IncidentDB:
             "llm_calls": r["llm_calls"],
             "total_input_tokens": r["total_input_tokens"],
             "total_output_tokens": r["total_output_tokens"],
-            "elevenlabs_chars": r["elevenlabs_chars"],
+            "tts_chars": r["tts_chars"],
             "avg_latency_ms": round(avg_latency, 1),
         }
 

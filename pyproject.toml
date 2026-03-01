@@ -8,7 +8,6 @@ dependencies = [
     "livekit-agents[openai]>=1.0",
     "livekit-plugins-silero",
     "livekit-plugins-speechmatics",
-    "livekit-plugins-elevenlabs",
     "python-dotenv",
     "PyGithub>=2.1.0",
     "backboard-sdk",

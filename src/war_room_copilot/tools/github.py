@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 from functools import lru_cache
 
 from github import Auth, Github
-from github.GithubException import GithubException
 from livekit.agents import ToolError, function_tool
 
-from ..config import GITHUB_ALLOWED_REPOS
-
-MAX_OUTPUT_CHARS = 2000
+from ..config import GITHUB_ALLOWED_REPOS, GITHUB_COMMIT_MSG_TRUNCATE, GITHUB_RESULT_LIMIT
+from ._util import run_github
 
 
 @lru_cache(maxsize=1)
@@ -35,32 +32,23 @@ def _resolve_repo(repo: str | None) -> str:
     raise ToolError("No repos configured. Set GITHUB_ALLOWED_REPOS in config.py")
 
 
-def _truncate(text: str) -> str:
-    if len(text) <= MAX_OUTPUT_CHARS:
-        return text
-    return text[:MAX_OUTPUT_CHARS] + "\n... (truncated)"
-
-
 @function_tool()
 async def search_code(query: str, repo: str | None = None) -> str:
     """Search for code in a GitHub repo. Use to find where errors, functions, or config live."""
     repo_name = _resolve_repo(repo)
     g = _get_github_client()
 
-    def _search() -> str:
+    def _inner() -> str:
         full_query = f"{query} repo:{repo_name}"
         results = g.search_code(full_query)
         lines: list[str] = []
-        for item in results[:10]:  # type: ignore[var-annotated]
+        for item in results[:GITHUB_RESULT_LIMIT]:  # type: ignore[var-annotated]
             lines.append(f"- {item.path} (score: {item.score})")
         if not lines:
             return "No results found."
         return "\n".join(lines)
 
-    try:
-        return _truncate(await asyncio.to_thread(_search))
-    except GithubException as e:
-        raise ToolError(f"GitHub API error: {e.data}") from e
+    return await run_github(_inner)
 
 
 @function_tool()
@@ -69,21 +57,18 @@ async def get_recent_commits(repo: str | None = None, branch: str = "main", coun
     repo_name = _resolve_repo(repo)
     g = _get_github_client()
 
-    def _fetch() -> str:
+    def _inner() -> str:
         r = g.get_repo(repo_name)
         commits = r.get_commits(sha=branch)[:count]
         lines: list[str] = []
         for c in commits:  # type: ignore[var-annotated]
             sha = c.sha[:7]
-            msg = (c.commit.message.split("\n")[0])[:80]
+            msg = (c.commit.message.split("\n")[0])[:GITHUB_COMMIT_MSG_TRUNCATE]
             author = c.commit.author.name if c.commit.author else "unknown"
             lines.append(f"- {sha} {author}: {msg}")
         return "\n".join(lines) if lines else "No commits found."
 
-    try:
-        return _truncate(await asyncio.to_thread(_fetch))
-    except GithubException as e:
-        raise ToolError(f"GitHub API error: {e.data}") from e
+    return await run_github(_inner)
 
 
 @function_tool()
@@ -92,7 +77,7 @@ async def get_commit_diff(commit_sha: str, repo: str | None = None) -> str:
     repo_name = _resolve_repo(repo)
     g = _get_github_client()
 
-    def _fetch() -> str:
+    def _inner() -> str:
         r = g.get_repo(repo_name)
         commit = r.get_commit(commit_sha)
         files = list(commit.files) if commit.files else []
@@ -110,10 +95,7 @@ async def get_commit_diff(commit_sha: str, repo: str | None = None) -> str:
             lines.append("")
         return "\n".join(lines)
 
-    try:
-        return _truncate(await asyncio.to_thread(_fetch))
-    except GithubException as e:
-        raise ToolError(f"GitHub API error: {e.data}") from e
+    return await run_github(_inner)
 
 
 @function_tool()
@@ -124,7 +106,7 @@ async def list_pull_requests(
     repo_name = _resolve_repo(repo)
     g = _get_github_client()
 
-    def _fetch() -> str:
+    def _inner() -> str:
         r = g.get_repo(repo_name)
         prs = r.get_pulls(state=state, sort="updated", direction="desc")[:count]
         lines: list[str] = []
@@ -134,10 +116,7 @@ async def list_pull_requests(
             lines.append(f"- #{pr.number} {pr.title}{merged} by {author}")
         return "\n".join(lines) if lines else "No pull requests found."
 
-    try:
-        return _truncate(await asyncio.to_thread(_fetch))
-    except GithubException as e:
-        raise ToolError(f"GitHub API error: {e.data}") from e
+    return await run_github(_inner)
 
 
 @function_tool()
@@ -146,19 +125,16 @@ async def search_issues(query: str, repo: str | None = None) -> str:
     repo_name = _resolve_repo(repo)
     g = _get_github_client()
 
-    def _search() -> str:
+    def _inner() -> str:
         full_query = f"{query} repo:{repo_name}"
         results = g.search_issues(full_query)
         lines: list[str] = []
-        for issue in results[:10]:  # type: ignore[var-annotated]
+        for issue in results[:GITHUB_RESULT_LIMIT]:  # type: ignore[var-annotated]
             state = issue.state
             lines.append(f"- #{issue.number} [{state}] {issue.title}")
         return "\n".join(lines) if lines else "No issues found."
 
-    try:
-        return _truncate(await asyncio.to_thread(_search))
-    except GithubException as e:
-        raise ToolError(f"GitHub API error: {e.data}") from e
+    return await run_github(_inner)
 
 
 @function_tool()
@@ -167,7 +143,7 @@ async def read_file(path: str, repo: str | None = None, ref: str = "main") -> st
     repo_name = _resolve_repo(repo)
     g = _get_github_client()
 
-    def _fetch() -> str:
+    def _inner() -> str:
         r = g.get_repo(repo_name)
         content = r.get_contents(path, ref=ref)
         if isinstance(content, list):
@@ -175,10 +151,7 @@ async def read_file(path: str, repo: str | None = None, ref: str = "main") -> st
         decoded: str = content.decoded_content.decode("utf-8", errors="replace")
         return decoded
 
-    try:
-        return _truncate(await asyncio.to_thread(_fetch))
-    except GithubException as e:
-        raise ToolError(f"GitHub API error: {e.data}") from e
+    return await run_github(_inner)
 
 
 @function_tool()
@@ -187,10 +160,10 @@ async def get_blame(path: str, repo: str | None = None) -> str:
     repo_name = _resolve_repo(repo)
     g = _get_github_client()
 
-    def _fetch() -> str:
+    def _inner() -> str:
         r = g.get_repo(repo_name)
         # PyGitHub doesn't have a direct blame API; use commits on the file
-        commits = r.get_commits(path=path)[:10]
+        commits = r.get_commits(path=path)[:GITHUB_RESULT_LIMIT]
         lines: list[str] = [f"Recent commits touching {path}:"]
         for c in commits:  # type: ignore[var-annotated]
             sha = c.sha[:7]
@@ -199,10 +172,7 @@ async def get_blame(path: str, repo: str | None = None) -> str:
             lines.append(f"- {sha} {author}: {msg}")
         return "\n".join(lines) if lines else "No commit history found for this file."
 
-    try:
-        return _truncate(await asyncio.to_thread(_fetch))
-    except GithubException as e:
-        raise ToolError(f"GitHub API error: {e.data}") from e
+    return await run_github(_inner)
 
 
 # ---------------------------------------------------------------------------
@@ -243,10 +213,7 @@ async def create_github_issue(
             issue = r.create_issue(title=title, body=body)
         return f"Issue #{issue.number} created: {issue.html_url}"
 
-    try:
-        return await asyncio.to_thread(_create)
-    except GithubException as e:
-        raise ToolError(f"GitHub API error creating issue: {e.data}") from e
+    return await run_github(_create)
 
 
 @function_tool()
@@ -307,10 +274,7 @@ async def revert_commit(commit_sha: str, repo: str | None = None) -> str:
             "Follow the instructions in the PR to complete the revert."
         )
 
-    try:
-        return await asyncio.to_thread(_revert)
-    except GithubException as e:
-        raise ToolError(f"GitHub API error creating revert PR: {e.data}") from e
+    return await run_github(_revert)
 
 
 @function_tool()
@@ -335,7 +299,4 @@ async def close_pull_request(pr_number: int, repo: str | None = None) -> str:
         pr.edit(state="closed")
         return f"PR #{pr_number} '{pr.title}' has been closed (not merged)."
 
-    try:
-        return await asyncio.to_thread(_close)
-    except GithubException as e:
-        raise ToolError(f"GitHub API error closing PR: {e.data}") from e
+    return await run_github(_close)

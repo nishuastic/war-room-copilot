@@ -12,7 +12,7 @@ interface MetricsData {
   llm_calls: number
   total_input_tokens: number
   total_output_tokens: number
-  elevenlabs_chars: number
+  tts_chars: number
   speaker_stats: Array<{
     speaker_id: string
     turns: number

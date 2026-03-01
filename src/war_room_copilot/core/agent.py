@@ -61,36 +61,8 @@ from ..models import SpeakerMetadata, TranscriptSegment
 from ..skills import SKILL_PROMPTS, SkillResult, SkillRouter
 from ..skills.investigation import run_investigation
 from ..skills.models import Skill
-from ..tools.datadog import (
-    get_datadog_monitors,
-    query_datadog_apm,
-    query_datadog_logs,
-    query_datadog_metrics,
-)
-from ..tools.github import (
-    close_pull_request,
-    create_github_issue,
-    get_blame,
-    get_commit_diff,
-    get_recent_commits,
-    list_pull_requests,
-    read_file,
-    revert_commit,
-    search_code,
-    search_issues,
-)
-from ..tools.logs import (
-    query_aks_logs,
-    query_azure_monitor,
-    query_cloudwatch_logs,
-    query_ecs_logs,
-    query_gcp_logs,
-    query_gke_pod_logs,
-    query_lambda_logs,
-)
-from ..tools.recall import recall_decision, set_memory_context
-from ..tools.runbook import search_runbook
-from ..tools.service_graph import get_service_dependencies, get_service_graph, get_service_health
+from ..tools import ALL_TOOLS
+from ..tools.recall import set_memory_context
 
 load_dotenv()
 
@@ -273,6 +245,7 @@ class WarRoomAgent(Agent):
         # Async background skill state (investigate)
         self._pending_result: str | None = None
         self._async_task: asyncio.Task[None] | None = None
+        self._investigate_notified: bool = False
 
     async def _run_silent_skill(
         self, context: str, user_message: str, skill_result: SkillResult
@@ -310,24 +283,24 @@ class WarRoomAgent(Agent):
             logger.exception("Silent skill failed for %s", skill_result.skill.value)
 
     async def _run_async_skill_background(self, context: str, user_message: str) -> None:
-        """Run investigate asynchronously and notify when done."""
+        """Run investigation. If it takes >1s, notify user; otherwise deliver inline."""
         logger.info("Background investigate started for: %s", user_message)
+        self._investigate_notified = False
         try:
             result = await run_investigation(context, user_message)
-            self._pending_result = result
             logger.info("Background investigate complete (%d chars)", len(result))
-            self.session.say(
-                "Done investigating. Let me know when you want me to share my findings."
-            )
+            if self._investigate_notified:
+                # Already told user we're working on it — park result for next wake word
+                self._pending_result = result
+            else:
+                # Fast result — deliver immediately
+                try:
+                    await self.session.say(result)
+                except Exception:
+                    self._pending_result = result
         except Exception:
             logger.exception("Background investigate failed")
-            self._pending_result = "The investigation ran into an error. Try asking me again."
-            try:
-                self.session.say(
-                    "I hit an issue during the investigation. Ask me again for what I found."
-                )
-            except Exception:
-                pass
+            self._pending_result = "Hit an error on that one. Ask me again and I'll retry."
 
     def _process_transcript(self, raw_text: str) -> list[TranscriptSegment]:
         """Log, store, and track all transcript segments. Returns parsed segments."""
@@ -423,8 +396,9 @@ class WarRoomAgent(Agent):
         # --- Notify if async task is still running ---
         if self._async_task is not None and not self._async_task.done():
             logger.info("Async skill still running — notifying user")
+            self._investigate_notified = True
             try:
-                self.session.say("Still on it, I'll let you know when I'm done.")
+                self.session.say("Still working on it.")
             except Exception:
                 pass
             return
@@ -457,19 +431,24 @@ class WarRoomAgent(Agent):
             asyncio.create_task(self._run_silent_skill(context, combined_text, skill_result))
             return
 
-        # --- INVESTIGATE: say "on it", then run in background ---
+        # --- INVESTIGATE: run in background, only notify if >1s ---
         if skill_result.skill == Skill.INVESTIGATE:
             logger.info(
                 "investigate skill — starting background task for: %s",
                 combined_text,
             )
-            try:
-                await self.session.say("On it, give me a moment to dig into this.")
-            except Exception:
-                logger.exception("Failed to say 'on it'")
             self._async_task = asyncio.create_task(
                 self._run_async_skill_background(context, combined_text)
             )
+            # Wait up to 1s — if investigation finishes fast, result is delivered inline
+            # If still running after 1s, tell user we're on it
+            await asyncio.sleep(1.0)
+            if self._async_task is not None and not self._async_task.done():
+                self._investigate_notified = True
+                try:
+                    self.session.say("On it, one sec.")
+                except Exception:
+                    pass
             return
 
         # --- All other skills: apply skill prompt and generate reply ---
@@ -542,9 +521,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             past_context = await long_term.get_session_context()
             if past_context:
                 prompt += (
-                    f"\n\n[MEMORY FROM PAST SESSIONS]\n{past_context}\n\n"
-                    "When relevant, proactively reference past session context. "
-                    "Example: 'In a previous session, the team decided to roll back Redis to v6...'"
+                    f"\n\n[PAST SESSIONS]\n{past_context}\n\n"
+                    "Reference this if relevant. Don't announce that you're using memory."
                 )
                 asyncio.create_task(
                     db.add_trace(session_id, "memory_loaded", {"context": past_context[:2000]})
@@ -581,43 +559,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         known_speakers=to_speaker_identifiers(known_speakers),
     )
 
-    tools: list[Any] = [
-        # GitHub — read
-        search_code,
-        get_recent_commits,
-        get_commit_diff,
-        list_pull_requests,
-        search_issues,
-        read_file,
-        get_blame,
-        # GitHub — write (requires 'repo' scope on GITHUB_TOKEN)
-        create_github_issue,
-        revert_commit,
-        close_pull_request,
-        # Memory
-        recall_decision,
-        # Runbooks
-        search_runbook,
-        # Service graph
-        get_service_graph,
-        get_service_dependencies,
-        get_service_health,
-        # Datadog monitoring
-        query_datadog_metrics,
-        query_datadog_logs,
-        query_datadog_apm,
-        get_datadog_monitors,
-        # AWS logs
-        query_cloudwatch_logs,
-        query_ecs_logs,
-        query_lambda_logs,
-        # GCP logs
-        query_gcp_logs,
-        query_gke_pod_logs,
-        # Azure logs
-        query_azure_monitor,
-        query_aks_logs,
-    ]
+    tools: list[Any] = list(ALL_TOOLS.values())
 
     session: AgentSession[Any] = AgentSession(
         stt=stt,
@@ -655,7 +597,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     )
 
     # Trace tool calls and LLM responses via session events
-    @session.on("function_tools_executed")  # type: ignore[arg-type]
+    @session.on("function_tools_executed")
     def _on_tools_executed(ev: Any) -> None:
         asyncio.create_task(db.update_metrics(session_id, llm_calls=1))
         for call, output in ev.zipped():

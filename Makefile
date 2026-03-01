@@ -39,7 +39,7 @@ livekit: ## Start LiveKit server (make livekit mode:prod)
 ifeq ($(mode),prod)
 	livekit-server --config /etc/livekit.yaml
 else
-	livekit-server --dev --bind 0.0.0.0 --log-level info
+	livekit-server --config .data/livekit-dev.yaml
 endif
 
 token: ## Generate a room token (make token room:my-room identity:alice ttl:1h)

@@ -8,7 +8,7 @@ import logging
 
 from openai import AsyncOpenAI
 
-from ..config import ROUTER_MODEL, ROUTER_TIMEOUT
+from ..config import ROUTER_CONTEXT_CHARS, ROUTER_MODEL, ROUTER_TIMEOUT
 from .models import Skill, SkillResult
 
 logger = logging.getLogger("war-room-copilot")
@@ -68,8 +68,10 @@ class SkillRouter:
         Uses a fast model with a short timeout.
         Falls back to GENERAL on any failure.
         """
-        # Truncate context to last 2000 chars
-        truncated = context[-2000:] if len(context) > 2000 else context
+        if len(context) > ROUTER_CONTEXT_CHARS:
+            truncated = context[-ROUTER_CONTEXT_CHARS:]
+        else:
+            truncated = context
         user_content = f"Context:\n{truncated}\n\nUser message: {user_message}"
 
         try:

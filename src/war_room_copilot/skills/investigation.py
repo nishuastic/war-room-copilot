@@ -1,4 +1,4 @@
-"""Background investigation runner: OpenAI tool-calling loop over GitHub tools."""
+"""Background investigation runner: OpenAI tool-calling loop over all available tools."""
 
 from __future__ import annotations
 
@@ -9,244 +9,23 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from ..config import LLM_MODEL
-from ..tools.datadog import (
-    get_datadog_monitors,
-    query_datadog_apm,
-    query_datadog_logs,
-    query_datadog_metrics,
-)
-from ..tools.github import (
-    get_blame,
-    get_commit_diff,
-    get_recent_commits,
-    list_pull_requests,
-    read_file,
-    search_code,
-    search_issues,
-)
+from ..config import INVESTIGATION_CONTEXT_CHARS, LLM_MODEL, MAX_INVESTIGATION_ROUNDS
+from ..tools import ALL_TOOLS
+from ..tools._registry import get_openai_schemas
 
 logger = logging.getLogger("war-room-copilot")
 
-_MAX_TOOL_ROUNDS = 6
-
-# Map tool name → callable (FunctionTool objects are directly awaitable)
-_TOOLS: dict[str, Any] = {
-    "search_code": search_code,
-    "get_recent_commits": get_recent_commits,
-    "get_commit_diff": get_commit_diff,
-    "list_pull_requests": list_pull_requests,
-    "search_issues": search_issues,
-    "read_file": read_file,
-    "get_blame": get_blame,
-    "query_datadog_metrics": query_datadog_metrics,
-    "query_datadog_logs": query_datadog_logs,
-    "query_datadog_apm": query_datadog_apm,
-    "get_datadog_monitors": get_datadog_monitors,
-}
-
-_TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "search_code",
-            "description": "Search for code in a GitHub repo. Find errors, functions, or config.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "repo": {"type": "string"},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_recent_commits",
-            "description": "Get recent commits on a branch. Use to see what changed recently.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "repo": {"type": "string"},
-                    "branch": {"type": "string"},
-                    "count": {"type": "integer"},
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_commit_diff",
-            "description": "Get the full diff for a specific commit. Inspect a suspicious change.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "commit_sha": {"type": "string"},
-                    "repo": {"type": "string"},
-                },
-                "required": ["commit_sha"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_pull_requests",
-            "description": "List recent pull requests. Find merged PRs that caused issues.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "state": {"type": "string"},
-                    "repo": {"type": "string"},
-                    "count": {"type": "integer"},
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_issues",
-            "description": "Search GitHub issues. Use to find related bugs or past incidents.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "repo": {"type": "string"},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "Read a file from a GitHub repo. Inspect config, code, or manifests.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "repo": {"type": "string"},
-                    "ref": {"type": "string"},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_blame",
-            "description": "Get git blame for a file. Use to find who last touched specific code.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "repo": {"type": "string"},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "query_datadog_metrics",
-            "description": "Query Datadog metrics API for a given metric over a time range.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "metric": {
-                        "type": "string",
-                        "description": "Metric name, e.g. 'system.cpu.user'",
-                    },
-                    "from_time": {
-                        "type": "string",
-                        "description": "Start time — '1h', '30m', or ISO8601",
-                    },
-                    "to_time": {
-                        "type": "string",
-                        "description": "End time — 'now' or ISO8601",
-                    },
-                },
-                "required": ["metric"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "query_datadog_logs",
-            "description": "Query Datadog Log Explorer for matching log entries.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Log search query, e.g. 'error timeout'",
-                    },
-                    "service": {
-                        "type": "string",
-                        "description": "Optional service name filter",
-                    },
-                    "minutes_ago": {
-                        "type": "integer",
-                        "description": "How far back to search (default 30)",
-                    },
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "query_datadog_apm",
-            "description": "Query Datadog APM for trace error rate and latency for a service.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "service": {
-                        "type": "string",
-                        "description": "Service name, e.g. 'backboard-gateway'",
-                    },
-                    "minutes_ago": {
-                        "type": "integer",
-                        "description": "Time window (default 30 min)",
-                    },
-                },
-                "required": ["service"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_datadog_monitors",
-            "description": "List all triggered (alerting or warning) Datadog monitors.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        },
-    },
-]
+_TOOL_SCHEMAS = get_openai_schemas(ALL_TOOLS)
 
 _SYSTEM_PROMPT = """\
-You are an investigator for a production incident war room.
-Use the available tools to thoroughly investigate the user's request.
-You have access to GitHub tools (commits, diffs, PRs, code) AND Datadog tools \
-(APM traces, metrics, logs, monitors).
-Chain multiple tool calls as needed — check monitoring data, commits, diffs, and code.
-When you have enough evidence, return a concise but complete summary of your findings,
-suitable for being read aloud in a voice call. Lead with the most important finding.\
+You are Sam, an SRE investigating a production incident. \
+Use the tools to dig into the issue. Chain calls as needed.
+
+When done, give a short verbal summary — like you're reporting to teammates on a call. \
+Lead with the most critical finding. 2-3 sentences max. No bullet points, no markdown. \
+Talk like an engineer: "p99 is at 12 seconds, pool's maxed out at 100 connections, \
+looks like the backboard queries are the bottleneck." Skip filler like "I investigated" \
+or "based on my analysis."\
 """
 
 
@@ -255,7 +34,7 @@ async def run_investigation(
     user_message: str,
     model: str = LLM_MODEL,
 ) -> str:
-    """Run a GitHub investigation via an OpenAI tool-calling loop.
+    """Run an investigation via an OpenAI tool-calling loop.
 
     Args:
         context: Recent conversation context for background.
@@ -271,12 +50,13 @@ async def run_investigation(
         {
             "role": "user",
             "content": (
-                f"Context from the war room:\n{context[-1500:]}\n\nInvestigate: {user_message}"
+                f"Context from the war room:\n{context[-INVESTIGATION_CONTEXT_CHARS:]}\n\n"
+                f"Investigate: {user_message}"
             ),
         },
     ]
 
-    for round_num in range(_MAX_TOOL_ROUNDS):
+    for round_num in range(MAX_INVESTIGATION_ROUNDS):
         response = await client.chat.completions.create(  # type: ignore[call-overload]
             model=model,
             messages=messages,
@@ -315,7 +95,7 @@ async def run_investigation(
         logger.info(
             "Investigation round %d/%d: called %d tool(s): %s",
             round_num + 1,
-            _MAX_TOOL_ROUNDS,
+            MAX_INVESTIGATION_ROUNDS,
             len(msg.tool_calls),
             ", ".join(tc.function.name for tc in msg.tool_calls),
         )
@@ -329,10 +109,10 @@ async def run_investigation(
 
 
 async def _call_tool(call_id: str, name: str, arguments_json: str) -> dict[str, Any]:
-    """Execute one GitHub tool call and return the tool-role result message."""
+    """Execute one tool call and return the tool-role result message."""
     try:
         args = json.loads(arguments_json)
-        tool_fn = _TOOLS.get(name)
+        tool_fn = ALL_TOOLS.get(name)
         if tool_fn is None:
             result = f"Unknown tool: {name}"
         else:

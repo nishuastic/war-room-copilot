@@ -8,26 +8,23 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 
 from livekit.agents import function_tool
 
-logger = logging.getLogger(__name__)
+from ..config import MOCK_DATA_DIR
+from ._util import truncate
 
-_MOCK_DATA_DIR = Path(__file__).parent.parent.parent.parent / "mock_data"
+logger = logging.getLogger(__name__)
 
 
 def _load_mock(filename: str) -> dict:
-    path = _MOCK_DATA_DIR / filename
+    path = MOCK_DATA_DIR / filename
     if path.exists():
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
+        logger.info("Loaded mock data from %s (%d bytes)", path, len(path.read_text()))
+        return data
+    logger.warning("Mock data file not found: %s (resolved: %s)", path, path.resolve())
     return {}
-
-
-def _truncate(text: str, limit: int = 2000) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit] + f"\n... [truncated at {limit} chars]"
 
 
 # ---------------------------------------------------------------------------
@@ -64,9 +61,10 @@ async def query_cloudwatch_logs(log_group: str, query: str = "", minutes_ago: in
     group_data = groups.get(log_group)
 
     if not group_data:
-        # Try partial match
+        # Try case-insensitive partial match
+        lg_lower = log_group.lower()
         for key in groups:
-            if log_group in key or key in log_group:
+            if lg_lower in key.lower() or key.lower() in lg_lower:
                 group_data = groups[key]
                 log_group = key
                 break
@@ -74,7 +72,7 @@ async def query_cloudwatch_logs(log_group: str, query: str = "", minutes_ago: in
     if not group_data:
         available = list(groups.keys())
         return (
-            f"[Mock] No CloudWatch log group found matching '{log_group}'.\n"
+            f"No CloudWatch log group found matching '{log_group}'.\n"
             f"Available mock log groups: {', '.join(available)}"
         )
 
@@ -84,15 +82,14 @@ async def query_cloudwatch_logs(log_group: str, query: str = "", minutes_ago: in
 
     if not events:
         return (
-            f"[Mock] No log events in '{log_group}' matching '{query}' "
-            f"in the last {minutes_ago} minutes."
+            f"No log events in '{log_group}' matching '{query}' in the last {minutes_ago} minutes."
         )
 
-    lines = [f"[Mock] CloudWatch Logs — {log_group} (last {minutes_ago} min, filter: '{query}'):\n"]
+    lines = [f"CloudWatch Logs — {log_group} (last {minutes_ago} min, filter: '{query}'):\n"]
     for e in events:
         lines.append(f"{e.get('timestamp', '')}  {e.get('message', '')}")
 
-    return _truncate("\n".join(lines))
+    return truncate("\n".join(lines))
 
 
 @function_tool()
@@ -117,21 +114,22 @@ async def query_ecs_logs(cluster: str, service: str, minutes_ago: int = 30) -> s
 
     svc_data = services.get(service)
     if not svc_data:
+        svc_lower = service.lower()
         for key in services:
-            if service in key or key in service:
+            if svc_lower in key.lower() or key.lower() in svc_lower:
                 svc_data = services[key]
                 service = key
                 break
 
     if not svc_data:
         return (
-            f"[Mock] No ECS service found matching '{service}' in cluster '{cluster}'.\n"
+            f"No ECS service found matching '{service}' in cluster '{cluster}'.\n"
             f"Available mock services: {', '.join(services.keys())}"
         )
 
     status = "HEALTHY" if svc_data["running_count"] == svc_data["desired_count"] else "DEGRADED"
     return (
-        f"[Mock] ECS Service: {service} in cluster {cluster}\n"
+        f"ECS Service: {service} in cluster {cluster}\n"
         f"  Status: {status}\n"
         f"  Running: {svc_data['running_count']}/{svc_data['desired_count']} tasks\n"
         f"  Pending: {svc_data['pending_count']}\n"
@@ -213,13 +211,13 @@ async def query_gcp_logs(
 
     if not all_logs:
         return (
-            f"[Mock] No GCP logs in project '{project}' "
+            f"No GCP logs in project '{project}' "
             f"for resource_type='{resource_type}' severity>={severity}."
         )
 
     all_logs.sort(key=lambda x: x["timestamp"], reverse=True)
     header = (
-        f"[Mock] GCP Cloud Logging — project: {project} | "
+        f"GCP Cloud Logging — project: {project} | "
         f"resource: {resource_type} | severity>={severity} | last {minutes_ago}min:\n"
     )
     lines = [header]
@@ -230,7 +228,7 @@ async def query_gcp_logs(
         msg = log["message"]
         lines.append(f"{log['timestamp']} [{sev}] {ns}/{pod}: {msg}")
 
-    return _truncate("\n".join(lines))
+    return truncate("\n".join(lines))
 
 
 @function_tool()
@@ -262,7 +260,7 @@ async def query_gke_pod_logs(
     if not ns_data:
         available = list(namespaces.keys())
         return (
-            f"[Mock] No GKE namespace '{namespace}' found in cluster '{cluster}'.\n"
+            f"No GKE namespace '{namespace}' found in cluster '{cluster}'.\n"
             f"Available mock namespaces: {', '.join(available)}"
         )
 
@@ -271,9 +269,9 @@ async def query_gke_pod_logs(
         pods = [p for p in pods if pod_prefix in p.get("name", "")]
 
     if not pods:
-        return f"[Mock] No pods found matching prefix '{pod_prefix}' in namespace '{namespace}'."
+        return f"No pods found matching prefix '{pod_prefix}' in namespace '{namespace}'."
 
-    lines = [f"[Mock] GKE cluster={cluster} namespace={namespace} (last {minutes_ago} min):\n"]
+    lines = [f"GKE cluster={cluster} namespace={namespace} (last {minutes_ago} min):\n"]
     for pod in pods:
         status = pod.get("status", "Unknown")
         restarts = pod.get("restarts", 0)
@@ -297,7 +295,7 @@ async def query_gke_pod_logs(
             lines.append(f"  {ts} [{sev}] {msg}")
         lines.append("")
 
-    return _truncate("\n".join(lines))
+    return truncate("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
@@ -332,12 +330,9 @@ async def query_azure_monitor(workspace_id: str, query: str, minutes_ago: int = 
     kql_example = mock.get("azure_monitor_queries", {}).get("example_kql", "")
 
     if not telemetry:
-        return f"[Mock] No Azure Monitor data found for workspace '{workspace_id}'."
+        return f"No Azure Monitor data found for workspace '{workspace_id}'."
 
-    lines = [
-        f"[Mock] Azure Monitor Log Analytics — workspace: {workspace_id} "
-        f"| last {minutes_ago} min:\n"
-    ]
+    lines = [f"Azure Monitor Log Analytics — workspace: {workspace_id} | last {minutes_ago} min:\n"]
     lines.append(f"Query: {query}\n")
     lines.append(
         f"Example KQL for OOMKilled events:\n  {kql_example}\n\n"
@@ -367,7 +362,7 @@ async def query_azure_monitor(workspace_id: str, query: str, minutes_ago: int = 
             detail += f" (x{count})"
         lines.append(detail)
 
-    return _truncate("\n".join(lines))
+    return truncate("\n".join(lines))
 
 
 @function_tool()
@@ -394,14 +389,14 @@ async def query_aks_logs(cluster: str, namespace: str, minutes_ago: int = 30) ->
     if not ns_data:
         available = list(namespaces.keys())
         return (
-            f"[Mock] No AKS namespace '{namespace}' found in cluster '{cluster}'.\n"
+            f"No AKS namespace '{namespace}' found in cluster '{cluster}'.\n"
             f"Available mock namespaces: {', '.join(available)}"
         )
 
     pods = ns_data.get("pods", [])
     deployments = ns_data.get("deployments", [])
 
-    lines = [f"[Mock] AKS cluster={cluster} namespace={namespace} (last {minutes_ago} min):\n"]
+    lines = [f"AKS cluster={cluster} namespace={namespace} (last {minutes_ago} min):\n"]
 
     if deployments:
         lines.append("Deployments:")
@@ -430,4 +425,4 @@ async def query_aks_logs(cluster: str, namespace: str, minutes_ago: int = 30) ->
                 lines.append(f"    {log.get('timestamp', '')} [{sev}] {log.get('message', '')}")
             lines.append("")
 
-    return _truncate("\n".join(lines))
+    return truncate("\n".join(lines))

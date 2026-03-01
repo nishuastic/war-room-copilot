@@ -8,40 +8,30 @@ from collections import defaultdict
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from openai import AsyncOpenAI
 
 from ...config import (
     CARBON_G_PER_LLM_CALL,
-    ELEVENLABS_COST_PER_CHAR,
     GPT4_MINI_INPUT_COST_PER_1K,
     GPT4_MINI_OUTPUT_COST_PER_1K,
     LLM_MODEL,
     RUNBOOKS_FILE,
+    SPEECHMATICS_TTS_COST_PER_CHAR,
 )
 from ...memory.db import IncidentDB
+from ..deps import get_db
 
 router = APIRouter()
-_db: IncidentDB | None = None
-
-
-def set_db(db: IncidentDB) -> None:
-    global _db
-    _db = db
-
-
-def _get_db() -> IncidentDB:
-    assert _db is not None, "DB not set"
-    return _db
 
 
 @router.get("/insights")
-async def get_insights() -> dict[str, Any]:
+async def get_insights(db: IncidentDB = Depends(get_db)) -> dict[str, Any]:
     """Cross-session insights: session count, total decisions, recent decisions."""
-    sessions = await _get_db().get_sessions()
+    sessions = await db.get_sessions()
     all_decisions: list[Any] = []
     for s in sessions:
-        decisions = await _get_db().get_decisions(s["id"])
+        decisions = await db.get_decisions(s["id"])
         for d in decisions:
             all_decisions.append(
                 {
@@ -59,43 +49,43 @@ async def get_insights() -> dict[str, Any]:
 
 
 @router.get("/sessions")
-async def list_sessions() -> list[dict[str, Any]]:
-    return await _get_db().get_sessions()
+async def list_sessions(db: IncidentDB = Depends(get_db)) -> list[dict[str, Any]]:
+    return await db.get_sessions()
 
 
 @router.get("/sessions/{session_id}")
-async def get_session(session_id: int) -> dict[str, Any]:
-    session = await _get_db().get_session(session_id)
+async def get_session(session_id: int, db: IncidentDB = Depends(get_db)) -> dict[str, Any]:
+    session = await db.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
 
 
 @router.get("/sessions/{session_id}/transcript")
-async def get_transcript(session_id: int) -> list[dict[str, Any]]:
-    return await _get_db().get_transcript(session_id)
+async def get_transcript(session_id: int, db: IncidentDB = Depends(get_db)) -> list[dict[str, Any]]:
+    return await db.get_transcript(session_id)
 
 
 @router.get("/sessions/{session_id}/decisions")
-async def get_decisions(session_id: int) -> list[dict[str, Any]]:
-    decisions = await _get_db().get_decisions(session_id)
+async def get_decisions(session_id: int, db: IncidentDB = Depends(get_db)) -> list[dict[str, Any]]:
+    decisions = await db.get_decisions(session_id)
     return [d.model_dump() for d in decisions]
 
 
 @router.get("/sessions/{session_id}/metrics")
-async def get_metrics(session_id: int) -> dict[str, Any]:
-    session = await _get_db().get_session(session_id)
+async def get_metrics(session_id: int, db: IncidentDB = Depends(get_db)) -> dict[str, Any]:
+    session = await db.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    raw = await _get_db().get_metrics(session_id)
-    transcript = await _get_db().get_transcript(session_id)
-    decisions = await _get_db().get_decisions(session_id)
+    raw = await db.get_metrics(session_id)
+    transcript = await db.get_transcript(session_id)
+    decisions = await db.get_decisions(session_id)
 
     # Cost calculation
     input_cost = raw["total_input_tokens"] / 1000 * GPT4_MINI_INPUT_COST_PER_1K
     output_cost = raw["total_output_tokens"] / 1000 * GPT4_MINI_OUTPUT_COST_PER_1K
-    tts_cost = raw["elevenlabs_chars"] * ELEVENLABS_COST_PER_CHAR
+    tts_cost = raw["tts_chars"] * SPEECHMATICS_TTS_COST_PER_CHAR
     total_cost = input_cost + output_cost + tts_cost
 
     # Carbon estimate
@@ -137,19 +127,19 @@ async def get_metrics(session_id: int) -> dict[str, Any]:
         "llm_calls": raw["llm_calls"],
         "total_input_tokens": raw["total_input_tokens"],
         "total_output_tokens": raw["total_output_tokens"],
-        "elevenlabs_chars": raw["elevenlabs_chars"],
+        "tts_chars": raw["tts_chars"],
         "speaker_stats": speaker_stats,
     }
 
 
 @router.get("/sessions/{session_id}/analytics")
-async def get_analytics(session_id: int) -> dict[str, Any]:
-    session = await _get_db().get_session(session_id)
+async def get_analytics(session_id: int, db: IncidentDB = Depends(get_db)) -> dict[str, Any]:
+    session = await db.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    transcript = await _get_db().get_transcript(session_id)
-    decisions = await _get_db().get_decisions(session_id)
+    transcript = await db.get_transcript(session_id)
+    decisions = await db.get_decisions(session_id)
 
     # Issue categorization by keyword matching
     _db_kw = ["database", "db", "postgres", "mysql", "redis", "query", "connection", "pool"]
@@ -203,12 +193,12 @@ async def get_analytics(session_id: int) -> dict[str, Any]:
 
 
 @router.get("/sessions/{session_id}/runbooks")
-async def get_runbooks(session_id: int) -> list[dict[str, Any]]:
-    session = await _get_db().get_session(session_id)
+async def get_runbooks(session_id: int, db: IncidentDB = Depends(get_db)) -> list[dict[str, Any]]:
+    session = await db.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    transcript = await _get_db().get_transcript(session_id)
+    transcript = await db.get_transcript(session_id)
     full_text = " ".join(row["text"].lower() for row in transcript)
 
     if not RUNBOOKS_FILE.exists():
@@ -239,13 +229,13 @@ async def get_runbooks(session_id: int) -> list[dict[str, Any]]:
 
 
 @router.get("/sessions/{session_id}/summary")
-async def get_summary(session_id: int) -> dict[str, str]:
-    session = await _get_db().get_session(session_id)
+async def get_summary(session_id: int, db: IncidentDB = Depends(get_db)) -> dict[str, str]:
+    session = await db.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    transcript = await _get_db().get_transcript(session_id)
-    decisions = await _get_db().get_decisions(session_id)
+    transcript = await db.get_transcript(session_id)
+    decisions = await db.get_decisions(session_id)
 
     started_at = session.get("started_at", 0)
     ended_at = session.get("ended_at")
